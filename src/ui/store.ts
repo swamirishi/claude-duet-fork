@@ -26,6 +26,7 @@ export interface UiState {
   password?: string;
   joinUrl?: string;       // tunnel/relay URL the candidate connects to (if any)
   webLink?: string;       // browser (ttyd) link to hand the candidate, if a bridge is running
+  webUser?: string;       // basic-auth username for the browser link (candidate's name)
   connectionMode: string;
   cost: number;
   contextPercent: number;

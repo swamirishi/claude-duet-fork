@@ -23,6 +23,7 @@ program
   .option("--permission-mode <mode>", "permission mode: auto (default) or interactive")
   .option("--effort <level>", "reasoning effort: low | medium | high | xhigh | max")
   .option("--web-link <url>", "browser link to pin in the banner for the candidate")
+  .option("--web-user <name>", "basic-auth username shown with the browser link")
   .action(async (options) => {
     console.log("  Starting session...");
     const { hostCommand } = await import("./commands/host.js");
@@ -40,6 +41,7 @@ program
       permissionMode: options.permissionMode || config.permissionMode || "auto",
       effort: options.effort,
       webLink: options.webLink,
+      webUser: options.webUser,
     });
   });
 

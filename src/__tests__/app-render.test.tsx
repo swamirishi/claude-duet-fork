@@ -56,13 +56,15 @@ describe("App render", () => {
     unmount();
   });
 
-  it("pins the candidate browser link when a web bridge is running", () => {
+  it("pins the candidate browser link + sign-in when a web bridge is running", () => {
     const { lastFrame, unmount } = mount("host", (s) =>
-      s.set({ webLink: "https://calm-frog-123.trycloudflare.com" }),
+      s.set({ webLink: "https://calm-frog-123.trycloudflare.com", webUser: "ada" }),
     );
     const frame = lastFrame() ?? "";
     expect(frame).toContain("send candidate this link");
     expect(frame).toContain("calm-frog-123.trycloudflare.com");
+    expect(frame).toContain("ada");       // basic-auth username (candidate name)
+    expect(frame).toContain("1eca17ca");  // password shown alongside
     expect(frame).toContain("cd-abc123"); // session code still shown below
     unmount();
   });
