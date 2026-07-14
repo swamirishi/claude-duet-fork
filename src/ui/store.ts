@@ -23,6 +23,8 @@ export interface UiState {
   hostUser: string;
   guestUser?: string;
   sessionCode: string;
+  password?: string;
+  joinUrl?: string;       // tunnel/relay URL the candidate connects to (if any)
   connectionMode: string;
   cost: number;
   contextPercent: number;

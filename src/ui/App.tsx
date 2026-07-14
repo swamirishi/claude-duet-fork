@@ -41,7 +41,8 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onQui
   const cols = process.stdout.columns || 80;
   const rows = process.stdout.rows || 24;
   const sidebarWidth = Math.max(28, Math.min(52, Math.floor(cols * 0.42)));
-  const bodyHeight = Math.max(6, rows - 5);
+  const showJoinInfo = state.role === "host" && !!state.sessionCode;
+  const bodyHeight = Math.max(6, rows - 5 - (showJoinInfo ? 2 : 0));
   const treeHeight = Math.max(4, Math.floor(bodyHeight / 2));
   const viewerHeight = Math.max(4, bodyHeight - treeHeight);
 
@@ -161,6 +162,25 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onQui
         cost={state.cost}
         contextPercent={state.contextPercent}
       />
+      {showJoinInfo ? (
+        <Box paddingX={1} width={cols}>
+          <Text wrap="wrap">
+            <Text color="green" bold>▶ share with candidate — </Text>
+            <Text>code </Text>
+            <Text bold color="white">{state.sessionCode}</Text>
+            <Text>   password </Text>
+            <Text bold color="white">{state.password ?? ""}</Text>
+            {state.joinUrl ? (
+              <Text>
+                {"   url "}
+                <Text bold color="white">{state.joinUrl}</Text>
+              </Text>
+            ) : (
+              <Text dimColor>   (P2P: use the join command printed at startup)</Text>
+            )}
+          </Text>
+        </Box>
+      ) : null}
       <Box flexGrow={1}>
         <Box flexDirection="column" width={cols - sidebarWidth - 1} height={bodyHeight}>
           <ChatView messages={state.messages} maxRows={bodyHeight} />

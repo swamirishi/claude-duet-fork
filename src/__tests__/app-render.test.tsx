@@ -22,7 +22,7 @@ const tree: FsNode = {
 
 function mount(role: "host" | "guest" = "host", pre?: (s: UiStore) => void) {
   const store = new UiStore(role, "eliran");
-  store.set({ sessionCode: "cd-abc123", connectionMode: "P2P", fsRoot: "/home/interview/project" });
+  store.set({ sessionCode: "cd-abc123", password: "1eca17ca", joinUrl: "wss://demo.trycloudflare.com", connectionMode: "tunnel", fsRoot: "/home/interview/project" });
   store.set({ fsTree: tree, fsSelected: "src", fsExpanded: new Set(["", "src"]) });
   store.addMessage({ id: "p1", type: "prompt", user: "eliran", isHost: true, text: "fix the bug", timestamp: 0 });
   pre?.(store); // apply extra state BEFORE render so lastFrame() reflects it
@@ -45,6 +45,9 @@ describe("App render", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("claude-duet");
     expect(frame).toContain("cd-abc123");
+    expect(frame).toContain("share with candidate"); // persistent join banner
+    expect(frame).toContain("1eca17ca");             // password pinned on top
+    expect(frame).toContain("trycloudflare.com");    // join URL pinned on top
     expect(frame).toContain("fix the bug");     // chat message
     expect(frame).toContain("project");          // tree root (basename of fsRoot)
     expect(frame).toContain("auth.ts");          // expanded file

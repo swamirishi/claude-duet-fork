@@ -138,6 +138,8 @@ export class TerminalUI {
   // ---- Welcome / setup-phase output (pre-mount, plain console) ----
 
   showWelcome(sessionCode: string, password: string, connectUrl?: string, joinCmd?: string): void {
+    // Pin the join info so it stays visible in the TUI (not just this one-time banner).
+    this.store.set({ sessionCode, password, joinUrl: connectUrl });
     this.applySessionBackground();
     const violet = (s: string) => pc.magenta(s);
     const dim = (s: string) => pc.dim(s);
