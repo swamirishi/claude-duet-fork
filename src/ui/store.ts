@@ -47,7 +47,12 @@ export interface UiState {
   fsFileTruncated?: boolean;
   fsFileError?: string;
   focus: "input" | "tree" | "viewer";
-  fsViewOffset: number;         // scroll offset in the viewer
+  fsViewOffset: number;         // scroll offset in the file viewer (lines from top)
+
+  // Terminal pane (read-only view of Claude's commands + output), shown in the
+  // viewer box by default; the box switches to file content when a file is open.
+  terminal: string[];
+  terminalScroll: number;       // lines scrolled up from the bottom (0 = newest)
 }
 
 /**
@@ -74,7 +79,18 @@ export class UiStore extends EventEmitter {
       fsExpanded: new Set([""]),
       focus: "input",
       fsViewOffset: 0,
+      terminal: [],
+      terminalScroll: 0,
     };
+  }
+
+  addTerminal(lines: string[]) {
+    if (lines.length === 0) return;
+    const MAX = 2000;
+    const merged = [...this.state.terminal, ...lines];
+    const terminal = merged.length > MAX ? merged.slice(merged.length - MAX) : merged;
+    this.state = { ...this.state, terminal, terminalScroll: 0 };
+    this.emitChange();
   }
 
   private emitChange() {
