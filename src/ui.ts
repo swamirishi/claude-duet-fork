@@ -112,6 +112,15 @@ export class TerminalUI {
 
   // ---- Filesystem panel ----
 
+  // Set the display names for the two participants (used by the guest, which
+  // otherwise wouldn't know the host's name or show its own).
+  setParticipants(host?: string, guest?: string): void {
+    const patch: Record<string, unknown> = {};
+    if (host) patch.hostUser = host;
+    if (guest) patch.guestUser = guest;
+    this.store.set(patch);
+  }
+
   setFsRoot(root: string): void {
     this.store.set({ fsRoot: root });
   }

@@ -96,6 +96,9 @@ export async function joinCommand(sessionCodeOrOffer: string, options: JoinOptio
   }
 
   ui.applySessionBackground();
+  // Show both people by name in the status bar (host name from the join result,
+  // guest name = this candidate).
+  ui.setParticipants(result.hostUser, options.name);
   ui.showSystem(`Connected! You're in a duet session with ${result.hostUser}.`);
   if (result.approvalMode) {
     ui.showSystem("Approval mode is ON — host will review your prompts.");
