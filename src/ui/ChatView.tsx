@@ -20,7 +20,7 @@ export function ChatView({ messages, maxRows }: Props) {
             return (
               <Box key={msg.id} marginTop={1}>
                 <Text color={msg.isHost ? "blue" : "magenta"} bold>
-                  [{msg.user}{msg.isHost ? " (host)" : ""}]:
+                  {msg.user}:
                 </Text>
                 <Text> {msg.text}</Text>
               </Box>

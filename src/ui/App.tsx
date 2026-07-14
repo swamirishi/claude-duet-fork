@@ -161,6 +161,7 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onQui
         connectionMode={state.connectionMode}
         cost={state.cost}
         contextPercent={state.contextPercent}
+        selfRole={state.role}
       />
       {showJoinInfo ? (
         <Box paddingX={1} width={cols}>
