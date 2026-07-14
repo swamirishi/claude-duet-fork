@@ -30,6 +30,7 @@ export interface UiState {
   contextPercent: number;
 
   messages: ChatMessage[];
+  chatScroll: number;          // lines scrolled up from the bottom (0 = pinned to newest)
   streamingId?: string;        // id of the response message currently accumulating
   claudeProcessing: boolean;
   typingUser?: string;
@@ -68,6 +69,7 @@ export class UiStore extends EventEmitter {
       cost: 0,
       contextPercent: 0,
       messages: [],
+      chatScroll: 0,
       claudeProcessing: false,
       fsExpanded: new Set([""]),
       focus: "input",
@@ -85,7 +87,7 @@ export class UiStore extends EventEmitter {
   }
 
   addMessage(msg: ChatMessage) {
-    this.state = { ...this.state, messages: [...this.state.messages, msg] };
+    this.state = { ...this.state, messages: [...this.state.messages, msg], chatScroll: 0 };
     this.emitChange();
   }
 
@@ -96,11 +98,11 @@ export class UiStore extends EventEmitter {
       const next = messages.map((m) =>
         m.id === streamingId ? { ...m, text: m.text + text } : m,
       );
-      this.state = { ...this.state, messages: next };
+      this.state = { ...this.state, messages: next, chatScroll: 0 };
     } else {
       const id = `resp-${this.state.messages.length}-${text.length}`;
       const msg: ChatMessage = { id, type: "response", text, timestamp: 0 };
-      this.state = { ...this.state, messages: [...messages, msg], streamingId: id };
+      this.state = { ...this.state, messages: [...messages, msg], streamingId: id, chatScroll: 0 };
     }
     this.emitChange();
   }

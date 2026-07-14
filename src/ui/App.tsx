@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import { StatusBar } from "./StatusBar.js";
-import { ChatView } from "./ChatView.js";
+import { ChatView, buildLines } from "./ChatView.js";
 import { FileTree, flattenTree } from "./FileTree.js";
 import { FileViewer } from "./FileViewer.js";
 import { UiStore, useUiState } from "./store.js";
@@ -42,11 +42,21 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onQui
   const rows = process.stdout.rows || 24;
   const sidebarWidth = Math.max(28, Math.min(52, Math.floor(cols * 0.42)));
   const showJoinInfo = state.role === "host" && !!state.sessionCode;
-  const bodyHeight = Math.max(6, rows - 5 - (showJoinInfo ? 2 : 0));
+  // Chrome rows: StatusBar (3) + input bar (3) + hint (1) = 7; host join banner up to 2 more.
+  const bodyHeight = Math.max(4, rows - 7 - (showJoinInfo ? 2 : 0));
   const treeHeight = Math.max(4, Math.floor(bodyHeight / 2));
   const viewerHeight = Math.max(4, bodyHeight - treeHeight);
 
   const flatRows = flattenTree(state.fsTree, state.fsExpanded);
+
+  // Chat pane sizing + scroll bounds (line-based so it never overflows the input bar).
+  const chatColWidth = cols - sidebarWidth - 1;
+  const chatTextWidth = Math.max(10, chatColWidth - 1);
+  const indicatorLines = (state.claudeProcessing ? 1 : 0) + (state.typingUser ? 1 : 0);
+  const chatHeight = Math.max(1, bodyHeight - indicatorLines);
+  const maxChatScroll = Math.max(0, buildLines(state.messages, chatTextWidth).length - chatHeight);
+  const scrollChat = (delta: number) =>
+    store.set({ chatScroll: Math.min(maxChatScroll, Math.max(0, store.state.chatScroll + delta)) });
 
   const cycleFocus = () => {
     const order: Array<typeof state.focus> = ["input", "tree", "viewer"];
@@ -121,7 +131,11 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onQui
       return;
     }
 
-    // focus === "input"
+    // focus === "input": ↑/↓ scroll the chat log (input has no history nav)
+    if (key.upArrow) return scrollChat(1);
+    if (key.downArrow) return scrollChat(-1);
+    if (key.pageUp) return scrollChat(Math.max(1, chatHeight - 1));
+    if (key.pageDown) return scrollChat(-Math.max(1, chatHeight - 1));
     if (key.tab) {
       const g = ghostCompletion(buffer, state.role);
       if (g) {
@@ -183,8 +197,8 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onQui
         </Box>
       ) : null}
       <Box flexGrow={1}>
-        <Box flexDirection="column" width={cols - sidebarWidth - 1} height={bodyHeight}>
-          <ChatView messages={state.messages} maxRows={bodyHeight} />
+        <Box flexDirection="column" width={chatColWidth} height={bodyHeight}>
+          <ChatView messages={state.messages} width={chatTextWidth} height={chatHeight} scroll={state.chatScroll} />
           {state.claudeProcessing ? <Text dimColor>  ✦ Claude is thinking…</Text> : null}
           {state.typingUser ? <Text dimColor>  ✎ {state.typingUser} is typing…</Text> : null}
         </Box>

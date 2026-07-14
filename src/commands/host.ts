@@ -166,7 +166,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
   }
 
   ui.startInputLoop();
-  ui.showHint("chat · @claude <prompt> · Tab: cycle chat/tree/viewer · ↑↓ navigate · Enter open · /help");
+  ui.showHint("chat · @claude <prompt> · ↑↓ scroll chat · Tab: chat/tree/viewer · Enter open · /help");
 
   // Filesystem panel — watch the project (Claude's working dir), confined to it.
   const fsWatcher = new FsWatcher(process.cwd());

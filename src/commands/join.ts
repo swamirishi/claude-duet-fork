@@ -102,7 +102,7 @@ export async function joinCommand(sessionCodeOrOffer: string, options: JoinOptio
   }
   console.log("");
   ui.startInputLoop();
-  ui.showHint("Type a message to chat, or @claude <prompt> to ask Claude. /help for commands.");
+  ui.showHint("chat · @claude <prompt> · ↑↓ scroll chat · Tab: chat/tree/viewer · Enter open · /help");
 
   let messageCount = 0;
   const sessionStartTime = Date.now();
