@@ -214,6 +214,18 @@ export class ClaudeDuetClient extends EventEmitter {
     });
   }
 
+  sendShellAttach(cols: number, rows: number): void {
+    this.sendEncrypted({ type: "shell_attach", user: this.user!, cols, rows, timestamp: Date.now() });
+  }
+
+  sendShellDetach(): void {
+    this.sendEncrypted({ type: "shell_detach", user: this.user!, timestamp: Date.now() });
+  }
+
+  sendShellResize(cols: number, rows: number): void {
+    this.sendEncrypted({ type: "shell_resize", cols, rows, timestamp: Date.now() });
+  }
+
   sendApprovalResponse(promptId: string, approved: boolean): void {
     if (!this.ws && !this.transport) return;
     this.sendEncrypted({

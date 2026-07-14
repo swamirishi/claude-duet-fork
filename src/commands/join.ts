@@ -103,6 +103,10 @@ export async function joinCommand(sessionCodeOrOffer: string, options: JoinOptio
   if (result.approvalMode) {
     ui.showSystem("Approval mode is ON — host will review your prompts.");
   }
+  if (result.shellEnabled) {
+    ui.setShellEnabled(true);
+    ui.showSystem("Shared shell available — press Ctrl-T to watch it (read-only).");
+  }
   console.log("");
   ui.startInputLoop();
   ui.showHint("chat · @claude <prompt> · ↑↓ scroll chat · Tab: chat/tree/viewer · Enter open · /help");
@@ -191,6 +195,39 @@ export async function joinCommand(sessionCodeOrOffer: string, options: JoinOptio
       case "fs_file":
         ui.setFileContent((msg as any).path, (msg as any).content, (msg as any).truncated, (msg as any).error);
         break;
+      case "shell_data":
+        ui.writeShell((msg as any).data);
+        break;
+    }
+  });
+
+  // Ctrl-T → attach to the shared shell, read-only (host drives in Step A).
+  ui.onShellEnter(() => {
+    if (ui.isShellActive()) return;
+    const size = ui.terminalSize();
+    ui.enterShell({
+      readOnly: true,
+      onData: () => {},
+      onDetach: () => {
+        try {
+          client.sendShellDetach();
+        } catch {
+          /* not connected — ignore */
+        }
+        ui.exitShell();
+      },
+      onResize: (cols, rows) => {
+        try {
+          client.sendShellResize(cols, rows);
+        } catch {
+          /* ignore */
+        }
+      },
+    });
+    try {
+      client.sendShellAttach(size.cols, size.rows);
+    } catch {
+      /* not connected — ignore */
     }
   });
 
