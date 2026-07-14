@@ -22,6 +22,7 @@ interface HostOptions {
   continueSession?: boolean;
   resumeSession?: string;
   permissionMode?: PermissionMode;
+  effort?: string;
 }
 
 export async function hostCommand(options: HostOptions): Promise<void> {
@@ -43,6 +44,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     continue: options.continueSession,
     resume: options.resumeSession,
     permissionMode: options.permissionMode ?? "auto",
+    effort: options.effort,
   });
 
   // Register event handler BEFORE start() to catch early errors
@@ -249,6 +251,16 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     },
     onKick: () => {
       server.kickGuest();
+    },
+    onEffort: async (level: string) => {
+      ui.showSystem(`Reloading Claude at effort=${level} (conversation preserved)…`);
+      server.broadcast({ type: "notice", message: `Host set Claude effort to ${level}.`, timestamp: Date.now() });
+      try {
+        await claude.setEffort(level);
+        ui.showSystem(`Effort is now ${level}.`);
+      } catch (err) {
+        ui.showError(`Failed to change effort: ${err instanceof Error ? err.message : err}`);
+      }
     },
   };
 

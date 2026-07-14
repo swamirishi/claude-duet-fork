@@ -15,7 +15,7 @@ interface AppProps {
   onQuit: () => void;
 }
 
-const HOST_CMDS = ["/trust", "/approval", "/kick"];
+const HOST_CMDS = ["/trust", "/approval", "/kick", "/effort "];
 const BASE_CMDS = ["@claude ", "/help", "/status", "/clear", "/leave", "/end", "/quit"];
 
 export function ghostCompletion(input: string, role: "host" | "guest"): string | null {

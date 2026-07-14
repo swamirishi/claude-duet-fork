@@ -9,7 +9,10 @@ export interface CommandContext {
   onLeave: () => void;
   onTrustChange?: (enabled: boolean) => void;
   onKick?: () => void;
+  onEffort?: (level: string) => void;
 }
+
+const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
 
 /**
  * Handle a slash command. Returns true if the input was a recognized command,
@@ -60,6 +63,20 @@ export function handleSlashCommand(input: string, ctx: CommandContext): boolean 
       ctx.ui.showSystem("Switched to approval mode — you'll review partner prompts.");
       return true;
 
+    case "effort": {
+      if (ctx.role !== "host") {
+        ctx.ui.showSystem("Only the host can change Claude's effort.");
+        return true;
+      }
+      const level = parts[1]?.toLowerCase();
+      if (!level || !EFFORT_LEVELS.includes(level)) {
+        ctx.ui.showSystem(`Usage: /effort <${EFFORT_LEVELS.join("|")}>  (lower = faster turns)`);
+        return true;
+      }
+      ctx.onEffort?.(level);
+      return true;
+    }
+
     case "kick":
       if (ctx.role !== "host") {
         ctx.ui.showSystem("Only the host can kick a guest.");
@@ -92,6 +109,7 @@ function showHelp(ctx: CommandContext): void {
     ui.showSystem("Host commands:");
     ui.showSystem("  /trust       — Disable approval (trust partner)");
     ui.showSystem("  /approval    — Enable approval mode");
+    ui.showSystem("  /effort <level> — Set Claude effort (low|medium|high|xhigh|max)");
     ui.showSystem("  /kick        — Disconnect the guest");
   }
   ui.showSystem("");
