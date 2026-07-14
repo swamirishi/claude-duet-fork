@@ -7,6 +7,7 @@ import {
   isApprovalResponse,
   isChatMessage,
   isTypingMessage,
+  isFsOpenMessage,
 } from "./protocol.js";
 import { deriveKey, encrypt, decrypt } from "./crypto.js";
 import type { DuetTransport } from "./transport.js";
@@ -163,6 +164,11 @@ export class ClaudeDuetServer extends EventEmitter {
       });
       return;
     }
+
+    if (isFsOpenMessage(msg)) {
+      this.emit("fs_open", msg.path);
+      return;
+    }
   }
 
   private handleMessage(ws: WebSocket, msg: unknown): void {
@@ -221,6 +227,11 @@ export class ClaudeDuetServer extends EventEmitter {
         isTyping: msg.isTyping,
         timestamp: Date.now(),
       });
+      return;
+    }
+
+    if (isFsOpenMessage(msg)) {
+      this.emit("fs_open", msg.path);
       return;
     }
   }

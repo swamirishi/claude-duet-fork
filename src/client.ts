@@ -206,6 +206,14 @@ export class ClaudeDuetClient extends EventEmitter {
     });
   }
 
+  sendFsOpen(path: string): void {
+    this.sendEncrypted({
+      type: "fs_open",
+      path,
+      timestamp: Date.now(),
+    });
+  }
+
   sendApprovalResponse(promptId: string, approved: boolean): void {
     if (!this.ws && !this.transport) return;
     this.sendEncrypted({

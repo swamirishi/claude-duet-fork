@@ -181,6 +181,22 @@ export async function joinCommand(sessionCodeOrOffer: string, options: JoinOptio
       case "error":
         ui.showError(msg.message);
         break;
+      case "fs_tree":
+        ui.setFsRoot((msg as any).root);
+        ui.setFsTree((msg as any).tree);
+        break;
+      case "fs_file":
+        ui.setFileContent((msg as any).path, (msg as any).content, (msg as any).truncated, (msg as any).error);
+        break;
+    }
+  });
+
+  // Opening a file from the shared tree asks the host to serve its contents.
+  ui.onOpenFile((rel) => {
+    try {
+      client.sendFsOpen(rel);
+    } catch {
+      /* not connected — ignore */
     }
   });
 

@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TerminalUI } from "../ui.js";
+import type { FsNode } from "../protocol.js";
+
+// The UI now drives an Ink render tree via a reactive store. These tests assert
+// on the store state (via ui.getState()) rather than console output.
 
 describe("TerminalUI", () => {
   let ui: TerminalUI;
 
   beforeEach(() => {
-    // Suppress console output during tests
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(process.stdout, "write").mockImplementation(() => true);
@@ -16,11 +19,15 @@ describe("TerminalUI", () => {
     vi.restoreAllMocks();
   });
 
+  const lastMessage = () => {
+    const msgs = ui.getState().messages;
+    return msgs[msgs.length - 1];
+  };
+
   it("stores input handler via onInput", () => {
     ui = new TerminalUI({ userName: "eliran", role: "host" });
     const handler = vi.fn();
     ui.onInput(handler);
-    // Handler is stored (internal) — we verify by simulating input
     ui.simulateInput("hello");
     expect(handler).toHaveBeenCalledWith("hello");
   });
@@ -33,243 +40,103 @@ describe("TerminalUI", () => {
     expect(handler).toHaveBeenCalledWith("p1", true);
   });
 
-  it("calls startInputLoop to begin reading stdin", () => {
+  it("onKeystroke stores handler without throwing", () => {
     ui = new TerminalUI({ userName: "eliran", role: "host" });
-    // startInputLoop should not throw
+    expect(() => ui.onKeystroke(vi.fn())).not.toThrow();
+  });
+
+  it("startInputLoop does not throw", () => {
+    ui = new TerminalUI({ userName: "eliran", role: "host" });
     expect(() => ui.startInputLoop()).not.toThrow();
   });
 
-  it("showUserPrompt displays 'you' for self messages", () => {
+  it("showUserPrompt records a prompt message with the user and text", () => {
     ui = new TerminalUI({ userName: "benji", role: "guest" });
     ui.showUserPrompt("benji", "hello world", "guest");
-    expect(console.log).toHaveBeenCalled();
-    const calls = (console.log as any).mock.calls;
-    const output = calls.map((c: any[]) => c.join(" ")).join("\n");
-    expect(output).toContain("you");
-    expect(output).toContain("hello world");
+    const m = lastMessage();
+    expect(m.type).toBe("prompt");
+    expect(m.user).toBe("benji");
+    expect(m.text).toBe("hello world");
+    expect(m.isHost).toBe(false);
   });
 
-  it("showUserPrompt displays partner name for partner messages", () => {
+  it("showUserPrompt marks host messages with isHost", () => {
     ui = new TerminalUI({ userName: "benji", role: "guest" });
     ui.showUserPrompt("eliran", "hey there", "host");
-    expect(console.log).toHaveBeenCalled();
-    const calls = (console.log as any).mock.calls;
-    const output = calls.map((c: any[]) => c.join(" ")).join("\n");
-    expect(output).toContain("eliran");
-    expect(output).toContain("hey there");
+    const m = lastMessage();
+    expect(m.isHost).toBe(true);
+    expect(m.user).toBe("eliran");
   });
 
-  it("showWelcome displays session info", () => {
+  it("showStreamChunk accumulates into a single response message", () => {
     ui = new TerminalUI({ userName: "eliran", role: "host" });
-    ui.showWelcome("cd-abc123", "secret");
-    expect(console.log).toHaveBeenCalled();
-  });
-
-  it("showWelcome displays a copy-paste join command", () => {
-    ui = new TerminalUI({ userName: "eliran", role: "host" });
-    ui.showWelcome("cd-abc123", "secret", "ws://192.168.1.5:4567");
-    const calls = (console.log as any).mock.calls;
-    const output = calls.map((c: any[]) => c.join(" ")).join("\n");
-    expect(output).toContain("npx claude-duet join cd-abc123 --password secret --url ws://192.168.1.5:4567");
-  });
-
-  it("applies terminal background on showWelcome", () => {
-    ui = new TerminalUI({ userName: "eliran", role: "host" });
-    ui.showWelcome("cd-abc123", "secret", "ws://localhost:3000");
-    const allWrites = (process.stdout.write as any).mock.calls.map((c: any[]) => String(c[0])).join("");
-    expect(allWrites).toContain("\x1b[48;2;");
-  });
-
-  it("restores terminal background on close", () => {
-    ui = new TerminalUI({ userName: "eliran", role: "host" });
-    ui.showWelcome("cd-abc123", "secret", "ws://localhost:3000");
-    ui.close();
-    const allWrites = (process.stdout.write as any).mock.calls.map((c: any[]) => String(c[0])).join("");
-    expect(allWrites).toContain("\x1b[0m");
-  });
-
-  it("applySessionBackground writes an ANSI background escape", () => {
-    ui = new TerminalUI({ userName: "benji", role: "guest" });
-    ui.applySessionBackground();
-    const allWrites = (process.stdout.write as any).mock.calls.map((c: any[]) => String(c[0])).join("");
-    expect(allWrites).toContain("\x1b[48;2;");
-  });
-
-  it("close restores background after applySessionBackground", () => {
-    ui = new TerminalUI({ userName: "benji", role: "guest" });
-    ui.applySessionBackground();
-    ui.close();
-    const allWrites = (process.stdout.write as any).mock.calls.map((c: any[]) => String(c[0])).join("");
-    // Should contain both apply and restore sequences
-    expect(allWrites).toContain("\x1b[48;2;");
-    expect(allWrites).toContain("\x1b[0m");
-  });
-
-  it("applySessionBackground is idempotent (only applies once)", () => {
-    ui = new TerminalUI({ userName: "benji", role: "guest" });
-    ui.applySessionBackground();
-    ui.applySessionBackground(); // second call should be a no-op
-    const writes = (process.stdout.write as any).mock.calls.filter(
-      (c: any[]) => String(c[0]).includes("\x1b[48;2;")
-    );
-    expect(writes.length).toBe(1);
-  });
-
-  it("showWelcome shows instruction to share join command", () => {
-    ui = new TerminalUI({ userName: "eliran", role: "host" });
-    ui.showWelcome("cd-abc123", "secret", "ws://192.168.1.5:4567");
-    const calls = (console.log as any).mock.calls;
-    const output = calls.map((c: any[]) => c.join(" ")).join("\n");
-    expect(output).toContain("Send your partner this command to join");
-  });
-
-  it("showUserPrompt with mode 'claude' shows Claude indicator for self", () => {
-    ui = new TerminalUI({ userName: "benji", role: "guest" });
-    ui.showUserPrompt("benji", "fix the bug", "guest", "claude");
-    const calls = (console.log as any).mock.calls;
-    const output = calls.map((c: any[]) => c.join(" ")).join("\n");
-    expect(output).toContain("you");
-    expect(output).toContain("Claude");
-    expect(output).toContain("fix the bug");
-  });
-
-  it("showUserPrompt with mode 'claude' shows partner name for partner", () => {
-    ui = new TerminalUI({ userName: "benji", role: "guest" });
-    ui.showUserPrompt("eliran", "fix the bug", "host", "claude");
-    const calls = (console.log as any).mock.calls;
-    const output = calls.map((c: any[]) => c.join(" ")).join("\n");
-    expect(output).toContain("eliran");
-    expect(output).toContain("Claude");
-    expect(output).toContain("fix the bug");
-  });
-
-  it("showClaudeThinking outputs thinking text", () => {
-    ui = new TerminalUI({ userName: "eliran", role: "host" });
-    ui.showClaudeThinking();
-    const calls = (console.log as any).mock.calls;
-    const output = calls.map((c: any[]) => c.join(" ")).join("\n");
-    expect(output).toContain("Claude is thinking");
-  });
-
-  it("showApprovalStatus('pending') shows waiting text", () => {
-    ui = new TerminalUI({ userName: "benji", role: "guest" });
-    ui.showApprovalStatus("pending");
-    const calls = (console.log as any).mock.calls;
-    const output = calls.map((c: any[]) => c.join(" ")).join("\n");
-    expect(output).toContain("Waiting for host to approve");
-  });
-
-  it("showApprovalStatus('approved') shows approved text", () => {
-    ui = new TerminalUI({ userName: "benji", role: "guest" });
-    ui.showApprovalStatus("approved");
-    const calls = (console.log as any).mock.calls;
-    const output = calls.map((c: any[]) => c.join(" ")).join("\n");
-    expect(output).toContain("Approved");
-  });
-
-  it("showApprovalStatus('rejected') shows rejected text", () => {
-    ui = new TerminalUI({ userName: "benji", role: "guest" });
-    ui.showApprovalStatus("rejected");
-    const calls = (console.log as any).mock.calls;
-    const output = calls.map((c: any[]) => c.join(" ")).join("\n");
-    expect(output).toContain("rejected");
-  });
-
-  it("showSessionSummary shows duration and message count", () => {
-    ui = new TerminalUI({ userName: "eliran", role: "host" });
-    ui.showSessionSummary({ duration: "5m 30s", messageCount: 12 });
-    const calls = (console.log as any).mock.calls;
-    const output = calls.map((c: any[]) => c.join(" ")).join("\n");
-    expect(output).toContain("Session ended");
-    expect(output).toContain("5m 30s");
-    expect(output).toContain("12");
-  });
-
-  it("showHint shows hint text", () => {
-    ui = new TerminalUI({ userName: "eliran", role: "host" });
-    ui.showHint("Type @claude to ask Claude");
-    const calls = (console.log as any).mock.calls;
-    const output = calls.map((c: any[]) => c.join(" ")).join("\n");
-    expect(output).toContain("Type @claude to ask Claude");
-  });
-
-  it("showStreamChunk first call shows Claude header", () => {
-    ui = new TerminalUI({ userName: "eliran", role: "host" });
-    ui.showStreamChunk("hello");
-    const allWrites = (process.stdout.write as any).mock.calls.map((c: any[]) => String(c[0])).join("");
-    expect(allWrites).toContain("\u2726");
-    expect(allWrites).toContain("Claude");
-  });
-
-  it("showStreamChunk subsequent calls don't repeat header", () => {
-    ui = new TerminalUI({ userName: "eliran", role: "host" });
-    ui.showStreamChunk("hello");
+    ui.showStreamChunk("Hello ");
     ui.showStreamChunk("world");
-    const allWrites = (process.stdout.write as any).mock.calls.map((c: any[]) => String(c[0])).join("");
-    const claudeMatches = allWrites.split("Claude").length - 1;
-    expect(claudeMatches).toBe(1);
+    const responses = ui.getState().messages.filter((m) => m.type === "response");
+    expect(responses).toHaveLength(1);
+    expect(responses[0].text).toBe("Hello world");
   });
 
-  it("showTurnComplete resets streaming state", () => {
-    ui = new TerminalUI({ userName: "eliran", role: "host" });
-    ui.showStreamChunk("hello");
-    ui.showTurnComplete(0.01, 1000);
-    ui.showStreamChunk("again");
-    const allWrites = (process.stdout.write as any).mock.calls.map((c: any[]) => String(c[0])).join("");
-    const claudeMatches = allWrites.split("Claude").length - 1;
-    expect(claudeMatches).toBe(2);
-  });
-
-  it("showToolUse shows orange arrow", () => {
-    ui = new TerminalUI({ userName: "eliran", role: "host" });
-    ui.showToolUse("Read", {});
-    const calls = (console.log as any).mock.calls;
-    const output = calls.map((c: any[]) => c.join(" ")).join("\n");
-    expect(output).toContain("\u25b8");
-    expect(output).toContain("Read");
-  });
-
-  it("showToolResult shows orange arrow", () => {
-    ui = new TerminalUI({ userName: "eliran", role: "host" });
-    ui.showToolResult("Read", "file contents");
-    const calls = (console.log as any).mock.calls;
-    const output = calls.map((c: any[]) => c.join(" ")).join("\n");
-    expect(output).toContain("\u25c2");
-    expect(output).toContain("Read");
-  });
-
-  it("showTurnComplete shows cost and duration with star", () => {
+  it("showTurnComplete records cost and updates the status bar", () => {
     ui = new TerminalUI({ userName: "eliran", role: "host" });
     ui.showTurnComplete(0.05, 4600);
-    const calls = (console.log as any).mock.calls;
-    const output = calls.map((c: any[]) => c.join(" ")).join("\n");
-    expect(output).toContain("\u2726");
-    expect(output).toContain("$0.0500");
-    expect(output).toContain("4.6s");
+    expect(ui.getState().cost).toBeCloseTo(0.05);
+    expect(lastMessage().text).toContain("$0.0500");
+    expect(lastMessage().text).toContain("4.6s");
   });
 
-  it("showClaudeThinking includes orange star", () => {
+  it("showClaudeThinking sets the processing flag", () => {
     ui = new TerminalUI({ userName: "eliran", role: "host" });
     ui.showClaudeThinking();
-    const calls = (console.log as any).mock.calls;
-    const output = calls.map((c: any[]) => c.join(" ")).join("\n");
-    expect(output).toContain("\x1b[38;5;208m");
+    expect(ui.getState().claudeProcessing).toBe(true);
   });
 
-  it("showTypingIndicator stores typing user", () => {
+  it("showApprovalRequest sets a pending approval; status clears it", () => {
     ui = new TerminalUI({ userName: "eliran", role: "host" });
-    expect(() => ui.showTypingIndicator("benji", true)).not.toThrow();
-    expect(() => ui.showTypingIndicator("benji", false)).not.toThrow();
+    ui.showApprovalRequest("p9", "benji", "delete everything");
+    expect(ui.getState().approval?.promptId).toBe("p9");
+    ui.showApprovalStatus("approved");
+    expect(ui.getState().approval).toBeUndefined();
   });
 
-  it("clearTypingIndicator clears state", () => {
+  it("showPartnerJoined sets guestUser on the host", () => {
     ui = new TerminalUI({ userName: "eliran", role: "host" });
-    expect(() => ui.clearTypingIndicator()).not.toThrow();
+    ui.showPartnerJoined("benji");
+    expect(ui.getState().guestUser).toBe("benji");
+    expect(lastMessage().type).toBe("session_event");
   });
 
-  it("onKeystroke stores handler", () => {
+  it("typing indicator toggles typingUser", () => {
     ui = new TerminalUI({ userName: "eliran", role: "host" });
-    const handler = vi.fn();
-    expect(() => ui.onKeystroke(handler)).not.toThrow();
+    ui.showTypingIndicator("benji", true);
+    expect(ui.getState().typingUser).toBe("benji");
+    ui.showTypingIndicator("benji", false);
+    expect(ui.getState().typingUser).toBeUndefined();
+  });
+
+  it("setFsTree populates the tree and default selection", () => {
+    ui = new TerminalUI({ userName: "eliran", role: "host" });
+    const tree: FsNode = {
+      name: "proj",
+      path: "",
+      type: "dir",
+      children: [
+        { name: "src", path: "src", type: "dir", children: [] },
+        { name: "README.md", path: "README.md", type: "file" },
+      ],
+    };
+    ui.setFsTree(tree);
+    expect(ui.getState().fsTree?.children).toHaveLength(2);
+    expect(ui.getState().fsSelected).toBe("src");
+  });
+
+  it("setFileContent populates the viewer; error clears content", () => {
+    ui = new TerminalUI({ userName: "eliran", role: "host" });
+    ui.setFileContent("README.md", "# Title", false);
+    expect(ui.getState().fsFilePath).toBe("README.md");
+    expect(ui.getState().fsFileContent).toBe("# Title");
+    ui.setFileContent("secret.bin", "", false, "Binary file — not shown.");
+    expect(ui.getState().fsFileError).toContain("Binary");
+    expect(ui.getState().fsFileContent).toBeUndefined();
   });
 });
