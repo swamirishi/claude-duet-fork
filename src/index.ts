@@ -22,6 +22,7 @@ program
   .option("--resume <id>", "resume a specific Claude Code session by ID")
   .option("--permission-mode <mode>", "permission mode: auto (default) or interactive")
   .option("--effort <level>", "reasoning effort: low | medium | high | xhigh | max")
+  .option("--web-link <url>", "browser link to pin in the banner for the candidate")
   .action(async (options) => {
     console.log("  Starting session...");
     const { hostCommand } = await import("./commands/host.js");
@@ -38,6 +39,7 @@ program
       resumeSession: options.resume,
       permissionMode: options.permissionMode || config.permissionMode || "auto",
       effort: options.effort,
+      webLink: options.webLink,
     });
   });
 

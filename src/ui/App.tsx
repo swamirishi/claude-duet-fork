@@ -42,8 +42,10 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onQui
   const rows = process.stdout.rows || 24;
   const sidebarWidth = Math.max(28, Math.min(52, Math.floor(cols * 0.42)));
   const showJoinInfo = state.role === "host" && !!state.sessionCode;
-  // Chrome rows: StatusBar (3) + input bar (3) + hint (1) = 7; host join banner up to 2 more.
-  const bodyHeight = Math.max(4, rows - 7 - (showJoinInfo ? 2 : 0));
+  const showWebLink = showJoinInfo && !!state.webLink;
+  // Chrome rows: StatusBar (3) + input bar (3) + hint (1) = 7; host join banner up
+  // to 2 more, plus 1 for the pinned candidate browser link when present.
+  const bodyHeight = Math.max(4, rows - 7 - (showJoinInfo ? 2 : 0) - (showWebLink ? 1 : 0));
   const treeHeight = Math.max(4, Math.floor(bodyHeight / 2));
   const viewerHeight = Math.max(4, bodyHeight - treeHeight);
 
@@ -192,9 +194,18 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onQui
         selfRole={state.role}
       />
       {showJoinInfo ? (
-        <Box paddingX={1} width={cols}>
+        <Box flexDirection="column" paddingX={1} width={cols}>
+          {showWebLink ? (
+            <Text wrap="wrap">
+              <Text color="green" bold>▶ send candidate this link — </Text>
+              <Text bold color="cyan">{state.webLink}</Text>
+              <Text dimColor>   (password </Text>
+              <Text color="white">{state.password ?? ""}</Text>
+              <Text dimColor>)</Text>
+            </Text>
+          ) : null}
           <Text wrap="wrap">
-            <Text color="green" bold>▶ share with candidate — </Text>
+            <Text color="green" bold>{showWebLink ? "  session — " : "▶ share with candidate — "}</Text>
             <Text>code </Text>
             <Text bold color="white">{state.sessionCode}</Text>
             <Text>   password </Text>

@@ -121,6 +121,12 @@ export class TerminalUI {
     this.store.set(patch);
   }
 
+  // Pin a browser (ttyd) link in the host banner so the interviewer can hand it
+  // to the candidate. Set when a browser bridge is serving the join client.
+  setWebLink(url?: string): void {
+    this.store.set({ webLink: url });
+  }
+
   setFsRoot(root: string): void {
     this.store.set({ fsRoot: root });
   }

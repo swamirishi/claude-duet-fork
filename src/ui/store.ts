@@ -25,6 +25,7 @@ export interface UiState {
   sessionCode: string;
   password?: string;
   joinUrl?: string;       // tunnel/relay URL the candidate connects to (if any)
+  webLink?: string;       // browser (ttyd) link to hand the candidate, if a bridge is running
   connectionMode: string;
   cost: number;
   contextPercent: number;
