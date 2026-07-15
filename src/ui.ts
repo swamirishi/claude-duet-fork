@@ -337,22 +337,15 @@ export class TerminalUI {
 
   showToolUse(tool: string, input: Record<string, unknown>): void {
     this.store.endStream();
-    this.store.addMessage({ id: this.nextId("tool"), type: "tool", text: tool, timestamp: 0 });
-    // Mirror activity into the terminal pane: Bash as a shell command, others as a tagged line.
-    if (tool.toLowerCase() === "bash" && typeof input.command === "string") {
-      this.store.addTerminal([`$ ${input.command as string}`]);
-    } else {
-      const detail = (input.file_path || input.path || input.pattern || input.query || "") as string;
-      this.store.addTerminal([`[${tool}]${detail ? " " + detail : ""}`]);
-    }
+    const detail = (input.command || input.file_path || input.path || input.pattern || input.query || "") as string;
+    const text = detail ? `${tool}: ${detail}` : tool;
+    this.store.addMessage({ id: this.nextId("tool"), type: "tool", text, timestamp: 0 });
   }
 
   showToolResult(tool: string, output: string): void {
     this.store.endStream();
     const trimmed = output.length > 120 ? output.slice(0, 117) + "…" : output;
     this.store.addMessage({ id: this.nextId("toolres"), type: "tool", text: `${tool}: ${trimmed}`, timestamp: 0 });
-    const lines = String(output).replace(/\s+$/, "").split("\n").slice(0, 300);
-    this.store.addTerminal(lines);
   }
 
   showTurnComplete(cost: number, durationMs: number): void {

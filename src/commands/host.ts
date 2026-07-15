@@ -213,6 +213,8 @@ export async function hostCommand(options: HostOptions): Promise<void> {
   // Set when the shell is enabled; lets the single approval handler resolve a
   // "shell-control:" approval without registering a second onApproval callback.
   let resolveShellControl: ((approved: boolean) => void) | undefined;
+  // Opens the host's fullscreen shell; wired to Ctrl-T and the /shell command.
+  let hostShellOpener: (() => void) | undefined;
   if (options.allowShell) {
     const hostSize = ui.terminalSize();
     shell = newPtyShellSession({ cwd: process.cwd(), cols: hostSize.cols, rows: hostSize.rows });
@@ -249,7 +251,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     // Host presses Ctrl-T → take over the screen with the live shell. Host
     // input reaches the PTY only while the host is the controller; Ctrl-]
     // reclaims control from the guest.
-    ui.onShellEnter(() => {
+    const openHostShell = () => {
       if (!shell || ui.isShellActive()) return;
       ui.enterShell({
         readOnly: false,
@@ -266,7 +268,9 @@ export async function hostCommand(options: HostOptions): Promise<void> {
         },
       });
       ui.writeShell(shell.snapshot()); // repaint recent output
-    });
+    };
+    ui.onShellEnter(openHostShell);   // Ctrl-T (native terminal)
+    hostShellOpener = openHostShell;  // exposed to the /shell command
 
     // Guest attached → record its size and send a snapshot to repaint.
     server.on("shell_attach", (info: { cols: number; rows: number }) => {
@@ -337,6 +341,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     sessionCode: session.code,
     partnerName: undefined,
     startTime: sessionStartTime,
+    onShell: options.allowShell ? () => hostShellOpener?.() : undefined,
     onLeave: async () => {
       // Notify guest before shutting down
       server.broadcast({

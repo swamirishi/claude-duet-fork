@@ -17,7 +17,7 @@ interface AppProps {
 }
 
 const HOST_CMDS = ["/trust", "/approval", "/kick", "/effort "];
-const BASE_CMDS = ["@claude ", "/help", "/status", "/clear", "/leave", "/end", "/quit"];
+const BASE_CMDS = ["@claude ", "/help", "/status", "/clear", "/shell", "/leave", "/end", "/quit"];
 
 export function ghostCompletion(input: string, role: "host" | "guest"): string | null {
   if (!input) return null;
@@ -58,8 +58,6 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
   const indicatorLines = (state.claudeProcessing ? 1 : 0) + (state.typingUser ? 1 : 0);
   const chatHeight = Math.max(1, bodyHeight - indicatorLines);
   const maxChatScroll = Math.max(0, buildLines(state.messages, chatTextWidth).length - chatHeight);
-  const viewerMode: "terminal" | "file" = state.fsFilePath ? "file" : "terminal";
-  const maxTermScroll = Math.max(0, state.terminal.length - Math.max(1, viewerHeight - 1));
   const scrollChat = (delta: number) =>
     store.set({ chatScroll: Math.min(maxChatScroll, Math.max(0, store.state.chatScroll + delta)) });
 
@@ -136,21 +134,13 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
     if (state.focus === "viewer") {
       if (key.tab) return cycleFocus();
       if (key.escape && store.state.fsFilePath) {
-        // back to the terminal view
+        // close the file
         return store.set({ fsFilePath: undefined, fsFileContent: undefined, fsFileError: undefined });
       }
-      if (viewerMode === "file") {
-        if (key.upArrow) return store.set({ fsViewOffset: Math.max(0, store.state.fsViewOffset - 1) });
-        if (key.downArrow) return store.set({ fsViewOffset: store.state.fsViewOffset + 1 });
-        if (key.pageUp) return store.set({ fsViewOffset: Math.max(0, store.state.fsViewOffset - viewerHeight) });
-        if (key.pageDown) return store.set({ fsViewOffset: store.state.fsViewOffset + viewerHeight });
-      } else {
-        const clampT = (n: number) => Math.min(maxTermScroll, Math.max(0, n));
-        if (key.upArrow) return store.set({ terminalScroll: clampT(store.state.terminalScroll + 1) });
-        if (key.downArrow) return store.set({ terminalScroll: clampT(store.state.terminalScroll - 1) });
-        if (key.pageUp) return store.set({ terminalScroll: clampT(store.state.terminalScroll + viewerHeight) });
-        if (key.pageDown) return store.set({ terminalScroll: clampT(store.state.terminalScroll - viewerHeight) });
-      }
+      if (key.upArrow) return store.set({ fsViewOffset: Math.max(0, store.state.fsViewOffset - 1) });
+      if (key.downArrow) return store.set({ fsViewOffset: store.state.fsViewOffset + 1 });
+      if (key.pageUp) return store.set({ fsViewOffset: Math.max(0, store.state.fsViewOffset - viewerHeight) });
+      if (key.pageDown) return store.set({ fsViewOffset: store.state.fsViewOffset + viewerHeight });
       return;
     }
 
@@ -256,14 +246,11 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
             rootName={rootName}
           />
           <FileViewer
-            mode={viewerMode}
             path={state.fsFilePath}
             content={state.fsFileContent}
             truncated={state.fsFileTruncated}
             error={state.fsFileError}
             offset={state.fsViewOffset}
-            terminal={state.terminal}
-            terminalScroll={state.terminalScroll}
             focused={state.focus === "viewer"}
             height={viewerHeight}
           />

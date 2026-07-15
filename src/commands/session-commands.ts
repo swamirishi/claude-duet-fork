@@ -10,6 +10,7 @@ export interface CommandContext {
   onTrustChange?: (enabled: boolean) => void;
   onKick?: () => void;
   onEffort?: (level: string) => void;
+  onShell?: () => void;
 }
 
 const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
@@ -43,6 +44,16 @@ export function handleSlashCommand(input: string, ctx: CommandContext): boolean 
     case "clear":
       // Clear screen but keep background
       process.stdout.write("\x1b[2J\x1b[H");
+      return true;
+
+    case "shell":
+    case "terminal":
+      if (!ctx.onShell) {
+        ctx.ui.showSystem("The shared shell isn't enabled for this session.");
+        return true;
+      }
+      // Works everywhere (Ctrl-T is a browser shortcut, so the candidate needs this).
+      ctx.onShell();
       return true;
 
     case "trust":
@@ -103,6 +114,9 @@ function showHelp(ctx: CommandContext): void {
   ui.showSystem("  /help        — Show this help");
   ui.showSystem("  /status      — Show session info");
   ui.showSystem("  /clear       — Clear the terminal");
+  if (ctx.onShell) {
+    ui.showSystem("  /shell       — Open the shared shell (Ctrl-\\ to return; type to request control)");
+  }
   ui.showSystem("  /leave       — Leave the session");
   if (ctx.role === "host") {
     ui.showSystem("");

@@ -51,6 +51,21 @@ describe("session commands", () => {
     expect(calls).not.toContain("/kick");
   });
 
+  it("/shell opens the shared shell when enabled (works for the guest too)", () => {
+    const onShell = vi.fn();
+    const ctx = createMockContext({ role: "guest", onShell });
+    expect(handleSlashCommand("/shell", ctx)).toBe(true);
+    expect(handleSlashCommand("/terminal", ctx)).toBe(true); // alias
+    expect(onShell).toHaveBeenCalledTimes(2);
+  });
+
+  it("/shell reports when the shell isn't enabled", () => {
+    const ctx = createMockContext({ onShell: undefined });
+    expect(handleSlashCommand("/shell", ctx)).toBe(true);
+    const calls = (ctx.ui.showSystem as any).mock.calls.map((c: any[]) => c[0]).join("\n");
+    expect(calls.toLowerCase()).toContain("isn't enabled");
+  });
+
   it("/leave calls onLeave", () => {
     const ctx = createMockContext();
     expect(handleSlashCommand("/leave", ctx)).toBe(true);
