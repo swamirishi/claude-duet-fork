@@ -12,6 +12,7 @@ import { FsWatcher } from "../fswatch.js";
 import { newPtyShellSession, type PtyShellSession } from "../shell.js";
 import type { FsNode } from "../protocol.js";
 import { join } from "node:path";
+import { createWriteStream, type WriteStream } from "node:fs";
 import * as readline from "node:readline";
 
 interface HostOptions {
@@ -28,6 +29,9 @@ interface HostOptions {
   webUser?: string;
   approveLink?: string;
   allowShell?: boolean;
+  runAsUid?: number;   // sandbox Claude + the candidate shell as this uid
+  runAsGid?: number;
+  recordFile?: string; // append the full transcript (prompts/responses/tools) here
 }
 
 export async function hostCommand(options: HostOptions): Promise<void> {
@@ -36,6 +40,21 @@ export async function hostCommand(options: HostOptions): Promise<void> {
   const approvalMode = !options.noApproval;
 
   const ui = new TerminalUI({ userName: options.name, role: "host" });
+
+  // Append-only transcript recorder. The host process (privileged) writes it to
+  // a directory the candidate has no access to, so it can't be read or tampered.
+  let recordStream: WriteStream | undefined;
+  if (options.recordFile) {
+    try {
+      recordStream = createWriteStream(options.recordFile, { flags: "a" });
+    } catch {
+      /* recording is best-effort — never block the session on it */
+    }
+  }
+  const record = (entry: Record<string, unknown>) => {
+    if (recordStream) recordStream.write(JSON.stringify({ ts: Date.now(), ...entry }) + "\n");
+  };
+
   if (options.webLink) ui.setWebLink(options.webLink);
   if (options.webUser) ui.setWebUser(options.webUser);
   if (options.approveLink) ui.setApproveLink(options.approveLink);
@@ -54,6 +73,8 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     resume: options.resumeSession,
     permissionMode: options.permissionMode ?? "auto",
     effort: options.effort,
+    uid: options.runAsUid,
+    gid: options.runAsGid,
   });
 
   // Register event handler BEFORE start() to catch early errors
@@ -62,18 +83,22 @@ export async function hostCommand(options: HostOptions): Promise<void> {
       case "stream_chunk":
         ui.showStreamChunk(event.text);
         server.broadcast({ ...event, timestamp: Date.now() });
+        record({ kind: "assistant", text: event.text });
         break;
       case "tool_use":
         ui.showToolUse(event.tool, event.input);
         server.broadcast({ ...event, timestamp: Date.now() });
+        record({ kind: "tool_use", tool: event.tool, input: event.input });
         break;
       case "tool_result":
         ui.showToolResult(event.tool, event.output);
         server.broadcast({ ...event, timestamp: Date.now() });
+        record({ kind: "tool_result", tool: event.tool, output: event.output });
         break;
       case "turn_complete":
         ui.showTurnComplete(event.cost, event.durationMs);
         server.broadcast({ ...event, timestamp: Date.now() });
+        record({ kind: "turn_complete", cost: event.cost, durationMs: event.durationMs });
         break;
       case "notice":
         ui.showSystem(event.message);
@@ -222,7 +247,13 @@ export async function hostCommand(options: HostOptions): Promise<void> {
   let hostShellOpener: (() => void) | undefined;
   if (options.allowShell) {
     const hostSize = ui.terminalSize();
-    shell = newPtyShellSession({ cwd: process.cwd(), cols: hostSize.cols, rows: hostSize.rows });
+    shell = newPtyShellSession({
+      cwd: process.cwd(),
+      cols: hostSize.cols,
+      rows: hostSize.rows,
+      uid: options.runAsUid,
+      gid: options.runAsGid,
+    });
     ui.setShellEnabled(true);
 
     let controllerId: string | null = null;        // guest id driving, or null = host
@@ -324,11 +355,13 @@ export async function hostCommand(options: HostOptions): Promise<void> {
 
   server.on("prompt", (msg) => {
     ui.showUserPrompt(msg.user, msg.text, "guest", "claude");
+    record({ kind: "prompt", user: msg.user, source: "guest", text: msg.text });
     router.handlePrompt(msg);
   });
 
   server.on("chat", (msg) => {
     ui.showUserPrompt(msg.user, msg.text, "guest", "chat");
+    record({ kind: "chat", user: msg.user, source: "guest", text: msg.text });
   });
 
   let messageCount = 0;
@@ -360,6 +393,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
       peerCleanup?.();
       fsWatcher.stop();
       shell?.dispose();
+      recordStream?.end();
       await claude.stop();
       await server.stop();
       ui.close();
@@ -477,6 +511,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
         timestamp: Date.now(),
       };
       ui.showUserPrompt(options.name, prompt, "host", "claude");
+      record({ kind: "prompt", user: options.name, source: "host", text: prompt });
       ui.showClaudeThinking();
       router.handlePrompt(msg);
     } else {
@@ -532,6 +567,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     peerCleanup?.();
     fsWatcher.stop();
     shell?.dispose();
+    recordStream?.end();
     await claude.stop();
     await server.stop();
     ui.close();

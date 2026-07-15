@@ -8,6 +8,8 @@ export interface PtyShellOptions {
   rows?: number;                     // initial rows; default 24
   env?: NodeJS.ProcessEnv;           // environment; default process.env
   bufferBytes?: number;              // rolling replay buffer cap; default 64 KiB
+  uid?: number;                      // run the shell as this uid (sandbox the candidate)
+  gid?: number;                      // ...and this gid
 }
 
 /**
@@ -43,6 +45,10 @@ export class PtyShellSession extends EventEmitter {
       cols,
       rows,
       env: { ...(options.env ?? process.env), TERM: "xterm-256color" } as { [key: string]: string },
+      // Drop privileges so the candidate's shell cannot read protected files.
+      // Requires the parent to be root; omitted when uid/gid are undefined.
+      ...(options.uid !== undefined ? { uid: options.uid } : {}),
+      ...(options.gid !== undefined ? { gid: options.gid } : {}),
     });
 
     this.proc.onData((chunk) => {

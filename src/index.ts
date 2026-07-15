@@ -26,6 +26,9 @@ program
   .option("--web-user <name>", "basic-auth username shown with the browser link")
   .option("--approve-link <url>", "local URL where you approve candidate check-ins")
   .option("--allow-shell", "enable the shared interactive shell (Ctrl-T) in the sandbox")
+  .option("--run-as-uid <uid>", "run Claude + the candidate shell as this uid (sandbox)")
+  .option("--run-as-gid <gid>", "run Claude + the candidate shell as this gid")
+  .option("--record-file <path>", "append the full transcript to this file (interviewer-only)")
   .action(async (options) => {
     console.log("  Starting session...");
     const { hostCommand } = await import("./commands/host.js");
@@ -46,6 +49,9 @@ program
       webUser: options.webUser,
       approveLink: options.approveLink,
       allowShell: options.allowShell || false,
+      runAsUid: options.runAsUid !== undefined ? parseInt(options.runAsUid, 10) : undefined,
+      runAsGid: options.runAsGid !== undefined ? parseInt(options.runAsGid, 10) : undefined,
+      recordFile: options.recordFile,
     });
   });
 
