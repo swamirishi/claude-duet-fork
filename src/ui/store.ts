@@ -27,6 +27,7 @@ export interface UiState {
   joinUrl?: string;       // tunnel/relay URL the candidate connects to (if any)
   webLink?: string;       // browser (ttyd) link to hand the candidate, if a bridge is running
   webUser?: string;       // basic-auth username for the browser link (candidate's name)
+  approveLink?: string;   // local URL where the host approves candidate check-ins
   shellEnabled?: boolean; // host offers the shared interactive shell (Ctrl-T)
   connectionMode: string;
   cost: number;

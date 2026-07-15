@@ -24,6 +24,7 @@ program
   .option("--effort <level>", "reasoning effort: low | medium | high | xhigh | max")
   .option("--web-link <url>", "browser link to pin in the banner for the candidate")
   .option("--web-user <name>", "basic-auth username shown with the browser link")
+  .option("--approve-link <url>", "local URL where you approve candidate check-ins")
   .option("--allow-shell", "enable the shared interactive shell (Ctrl-T) in the sandbox")
   .action(async (options) => {
     console.log("  Starting session...");
@@ -43,6 +44,7 @@ program
       effort: options.effort,
       webLink: options.webLink,
       webUser: options.webUser,
+      approveLink: options.approveLink,
       allowShell: options.allowShell || false,
     });
   });

@@ -44,9 +44,10 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
   const sidebarWidth = Math.max(28, Math.min(52, Math.floor(cols * 0.42)));
   const showJoinInfo = state.role === "host" && !!state.sessionCode;
   const showWebLink = showJoinInfo && !!state.webLink;
+  const showApprove = showJoinInfo && !!state.approveLink;
   // Chrome rows: StatusBar (3) + input bar (3) + hint (1) = 7; host join banner up
-  // to 2 more, plus 1 for the pinned candidate browser link when present.
-  const bodyHeight = Math.max(4, rows - 7 - (showJoinInfo ? 2 : 0) - (showWebLink ? 2 : 0));
+  // to 2 more, +2 for the pinned candidate link, +1 for the approve line.
+  const bodyHeight = Math.max(4, rows - 7 - (showJoinInfo ? 2 : 0) - (showWebLink ? 2 : 0) - (showApprove ? 1 : 0));
   const treeHeight = Math.max(4, Math.floor(bodyHeight / 2));
   const viewerHeight = Math.max(4, bodyHeight - treeHeight);
 
@@ -192,6 +193,13 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
       />
       {showJoinInfo ? (
         <Box flexDirection="column" paddingX={1} width={cols}>
+          {showApprove ? (
+            <Text wrap="wrap">
+              <Text color="yellow" bold>✔ approve candidates here — </Text>
+              <Text bold color="yellow">{state.approveLink}</Text>
+              <Text dimColor> (open in your browser)</Text>
+            </Text>
+          ) : null}
           {showWebLink ? (
             <Text wrap="wrap">
               <Text color="green" bold>▶ send candidate this link — </Text>

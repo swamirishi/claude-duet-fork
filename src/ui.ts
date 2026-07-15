@@ -143,6 +143,11 @@ export class TerminalUI {
     this.store.set({ webUser: user });
   }
 
+  // Local URL where the interviewer approves candidate check-ins (identity gate).
+  setApproveLink(url?: string): void {
+    this.store.set({ approveLink: url });
+  }
+
   // Advertise that the shared interactive shell (Ctrl-T) is available.
   setShellEnabled(enabled: boolean): void {
     this.store.set({ shellEnabled: enabled });

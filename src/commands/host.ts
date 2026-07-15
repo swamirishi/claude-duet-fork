@@ -26,6 +26,7 @@ interface HostOptions {
   effort?: string;
   webLink?: string;
   webUser?: string;
+  approveLink?: string;
   allowShell?: boolean;
 }
 
@@ -37,6 +38,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
   const ui = new TerminalUI({ userName: options.name, role: "host" });
   if (options.webLink) ui.setWebLink(options.webLink);
   if (options.webUser) ui.setWebUser(options.webUser);
+  if (options.approveLink) ui.setApproveLink(options.approveLink);
 
   // Create server first so event handler can reference it
   const server = new ClaudeDuetServer({
