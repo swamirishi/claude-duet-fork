@@ -11,6 +11,8 @@ import {
   isShellAttachMessage,
   isShellDetachMessage,
   isShellResizeMessage,
+  isShellInputMessage,
+  isShellControlRequestMessage,
 } from "./protocol.js";
 import { deriveKey, encrypt, decrypt } from "./crypto.js";
 import type { DuetTransport } from "./transport.js";
@@ -190,6 +192,16 @@ export class ClaudeDuetServer extends EventEmitter {
       this.emit("shell_resize", { cols: msg.cols, rows: msg.rows });
       return;
     }
+
+    if (isShellInputMessage(msg)) {
+      this.emit("shell_input", msg.data);
+      return;
+    }
+
+    if (isShellControlRequestMessage(msg)) {
+      this.emit("shell_control_request", { user: this.guestUser ?? msg.user });
+      return;
+    }
   }
 
   private handleMessage(ws: WebSocket, msg: unknown): void {
@@ -269,6 +281,16 @@ export class ClaudeDuetServer extends EventEmitter {
 
     if (isShellResizeMessage(msg)) {
       this.emit("shell_resize", { cols: msg.cols, rows: msg.rows });
+      return;
+    }
+
+    if (isShellInputMessage(msg)) {
+      this.emit("shell_input", msg.data);
+      return;
+    }
+
+    if (isShellControlRequestMessage(msg)) {
+      this.emit("shell_control_request", { user: this.guestUser ?? msg.user });
       return;
     }
   }

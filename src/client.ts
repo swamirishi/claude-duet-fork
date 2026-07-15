@@ -226,6 +226,14 @@ export class ClaudeDuetClient extends EventEmitter {
     this.sendEncrypted({ type: "shell_resize", cols, rows, timestamp: Date.now() });
   }
 
+  sendShellInput(data: string): void {
+    this.sendEncrypted({ type: "shell_input", data, timestamp: Date.now() });
+  }
+
+  sendShellControlRequest(): void {
+    this.sendEncrypted({ type: "shell_control_request", user: this.user!, timestamp: Date.now() });
+  }
+
   sendApprovalResponse(promptId: string, approved: boolean): void {
     if (!this.ws && !this.transport) return;
     this.sendEncrypted({

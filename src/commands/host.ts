@@ -207,12 +207,33 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     });
   });
 
-  // Shared interactive shell (Step A: host drives, guest attaches read-only).
+  // Shared interactive shell. Host drives by default; the guest can request
+  // control (gated by approval mode). Exactly one side controls the PTY.
   let shell: PtyShellSession | undefined;
+  // Set when the shell is enabled; lets the single approval handler resolve a
+  // "shell-control:" approval without registering a second onApproval callback.
+  let resolveShellControl: ((approved: boolean) => void) | undefined;
   if (options.allowShell) {
-    const size = ui.terminalSize();
-    shell = newPtyShellSession({ cwd: process.cwd(), cols: size.cols, rows: size.rows });
+    const hostSize = ui.terminalSize();
+    shell = newPtyShellSession({ cwd: process.cwd(), cols: hostSize.cols, rows: hostSize.rows });
     ui.setShellEnabled(true);
+
+    let controller: "host" | "guest" = "host";
+    let guestSize = { cols: hostSize.cols, rows: hostSize.rows };
+
+    const grantControl = (who: "host" | "guest") => {
+      controller = who;
+      if (who === "guest") {
+        shell!.resize(guestSize.cols, guestSize.rows);
+        server.broadcast({ type: "shell_control_grant", granted: true, timestamp: Date.now() });
+        ui.showSystem(`${server.getGuestUser() ?? "guest"} now controls the shell.`);
+      } else {
+        const s = ui.terminalSize();
+        shell!.resize(s.cols, s.rows);
+        server.broadcast({ type: "shell_control_grant", granted: false, timestamp: Date.now() });
+        ui.showSystem("You have control of the shell.");
+      }
+    };
 
     // PTY output → host screen (when attached) + guest (always; guest renders
     // only while attached). The rolling buffer is kept inside the session.
@@ -225,25 +246,71 @@ export async function hostCommand(options: HostOptions): Promise<void> {
       ui.showSystem("Shell exited.");
     });
 
-    // Host presses Ctrl-T → take over the screen with the live shell.
+    // Host presses Ctrl-T → take over the screen with the live shell. Host
+    // input reaches the PTY only while the host is the controller; Ctrl-]
+    // reclaims control from the guest.
     ui.onShellEnter(() => {
       if (!shell || ui.isShellActive()) return;
       ui.enterShell({
         readOnly: false,
-        onData: (data) => shell!.write(data),
+        header: "you drive · Ctrl-] reclaim",
+        onData: (data) => {
+          if (controller === "host") shell!.write(data);
+        },
+        onControlKey: () => {
+          if (controller !== "host") grantControl("host");
+        },
         onDetach: () => ui.exitShell(),
-        onResize: (cols, rows) => shell!.resize(cols, rows),
+        onResize: (cols, rows) => {
+          if (controller === "host") shell!.resize(cols, rows);
+        },
       });
       ui.writeShell(shell.snapshot()); // repaint recent output
     });
 
-    // Guest attached → send a snapshot so it repaints the current screen.
-    server.on("shell_attach", () => {
+    // Guest attached → record its size and send a snapshot to repaint.
+    server.on("shell_attach", (info: { cols: number; rows: number }) => {
+      guestSize = { cols: info.cols, rows: info.rows };
+      if (controller === "guest") shell!.resize(guestSize.cols, guestSize.rows);
       if (shell) server.broadcast({ type: "shell_data", data: shell.snapshot(), timestamp: Date.now() });
     });
-    // Step A: guest is read-only, so guest resize/detach don't affect the PTY.
-    server.on("shell_resize", () => {});
-    server.on("shell_detach", () => {});
+
+    server.on("shell_resize", (info: { cols: number; rows: number }) => {
+      guestSize = { cols: info.cols, rows: info.rows };
+      if (controller === "guest") shell!.resize(guestSize.cols, guestSize.rows);
+    });
+
+    // Guest keystrokes reach the PTY only while it holds control.
+    server.on("shell_input", (data: string) => {
+      if (controller === "guest") shell!.write(data);
+    });
+
+    // Guest requests control → approve (if approval mode) or grant immediately.
+    server.on("shell_control_request", (info: { user: string }) => {
+      if (controller === "guest") return; // already has it
+      if (approvalMode) {
+        ui.showApprovalRequest(`shell-control:${info.user}`, info.user, "wants control of the shared shell");
+      } else {
+        grantControl("guest");
+      }
+    });
+
+    // Guest detaches or leaves → control returns to the host.
+    server.on("shell_detach", () => {
+      if (controller === "guest") grantControl("host");
+    });
+    server.on("guest_left", () => {
+      if (controller === "guest") controller = "host";
+    });
+
+    // The single approval handler (below) calls this for shell-control prompts.
+    resolveShellControl = (approved: boolean) => {
+      if (approved) grantControl("guest");
+      else {
+        server.broadcast({ type: "shell_control_grant", granted: false, timestamp: Date.now() });
+        ui.showSystem("Shell control request denied.");
+      }
+    };
   }
 
   const router = new PromptRouter(claude, server, {
@@ -420,6 +487,10 @@ export async function hostCommand(options: HostOptions): Promise<void> {
   });
 
   ui.onApproval((promptId, approved) => {
+    if (promptId.startsWith("shell-control:")) {
+      resolveShellControl?.(approved);
+      return;
+    }
     router.handleApproval({ promptId, approved });
     if (!approved) {
       ui.showSystem("Prompt rejected.");
