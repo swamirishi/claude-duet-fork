@@ -12,6 +12,7 @@ interface AppProps {
   onKeystroke: () => void;
   onApproval: (promptId: string, approved: boolean) => void;
   onOpenFile: (relPath: string) => void;
+  onShellEnter: () => void;
   onQuit: () => void;
 }
 
@@ -25,7 +26,7 @@ export function ghostCompletion(input: string, role: "host" | "guest"): string |
   return hit ?? null;
 }
 
-export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onQuit }: AppProps) {
+export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShellEnter, onQuit }: AppProps) {
   const { exit } = useApp();
   const state = useUiState(store);
   const [buffer, setBuffer] = useState("");
@@ -100,6 +101,12 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onQui
     if (key.ctrl && input === "c") {
       onQuit();
       exit();
+      return;
+    }
+
+    // Ctrl-T — enter the shared fullscreen shell (when the host offers it).
+    if (key.ctrl && input === "t") {
+      if (state.shellEnabled) onShellEnter();
       return;
     }
 
@@ -277,7 +284,8 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onQui
       )}
       <Box paddingX={1}>
         <Text dimColor>
-          {state.hint ?? "Type to chat · @claude <prompt> · Tab: cycle chat/tree/viewer · ↑↓ navigate · Enter open"}
+          {state.hint ??
+            `Type to chat · @claude <prompt> · Tab: cycle · ↑↓ navigate${state.shellEnabled ? " · Ctrl-T shell" : ""}`}
         </Text>
       </Box>
     </Box>

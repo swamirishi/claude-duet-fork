@@ -9,6 +9,7 @@ import { parseSessionHistory, getProjectSessionDir } from "../history.js";
 import { createOffer } from "../peer.js";
 import { copyToClipboard } from "../clipboard.js";
 import { FsWatcher } from "../fswatch.js";
+import { newPtyShellSession, type PtyShellSession } from "../shell.js";
 import type { FsNode } from "../protocol.js";
 import { join } from "node:path";
 import * as readline from "node:readline";
@@ -25,6 +26,7 @@ interface HostOptions {
   effort?: string;
   webLink?: string;
   webUser?: string;
+  allowShell?: boolean;
 }
 
 export async function hostCommand(options: HostOptions): Promise<void> {
@@ -42,6 +44,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     password: session.password,
     sessionCode: session.code,
     approvalMode,
+    shellEnabled: options.allowShell || false,
   });
 
   const claude = new ClaudeBridge({
@@ -204,6 +207,45 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     });
   });
 
+  // Shared interactive shell (Step A: host drives, guest attaches read-only).
+  let shell: PtyShellSession | undefined;
+  if (options.allowShell) {
+    const size = ui.terminalSize();
+    shell = newPtyShellSession({ cwd: process.cwd(), cols: size.cols, rows: size.rows });
+    ui.setShellEnabled(true);
+
+    // PTY output → host screen (when attached) + guest (always; guest renders
+    // only while attached). The rolling buffer is kept inside the session.
+    shell.on("data", (chunk: string) => {
+      ui.writeShell(chunk);
+      server.broadcast({ type: "shell_data", data: chunk, timestamp: Date.now() });
+    });
+    shell.on("exit", () => {
+      if (ui.isShellActive()) ui.exitShell();
+      ui.showSystem("Shell exited.");
+    });
+
+    // Host presses Ctrl-T → take over the screen with the live shell.
+    ui.onShellEnter(() => {
+      if (!shell || ui.isShellActive()) return;
+      ui.enterShell({
+        readOnly: false,
+        onData: (data) => shell!.write(data),
+        onDetach: () => ui.exitShell(),
+        onResize: (cols, rows) => shell!.resize(cols, rows),
+      });
+      ui.writeShell(shell.snapshot()); // repaint recent output
+    });
+
+    // Guest attached → send a snapshot so it repaints the current screen.
+    server.on("shell_attach", () => {
+      if (shell) server.broadcast({ type: "shell_data", data: shell.snapshot(), timestamp: Date.now() });
+    });
+    // Step A: guest is read-only, so guest resize/detach don't affect the PTY.
+    server.on("shell_resize", () => {});
+    server.on("shell_detach", () => {});
+  }
+
   const router = new PromptRouter(claude, server, {
     hostUser: options.name,
     approvalMode,
@@ -245,6 +287,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
       connInfo?.cleanup?.();
       peerCleanup?.();
       fsWatcher.stop();
+      shell?.dispose();
       await claude.stop();
       await server.stop();
       ui.close();
@@ -411,6 +454,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     connInfo?.cleanup?.();
     peerCleanup?.();
     fsWatcher.stop();
+    shell?.dispose();
     await claude.stop();
     await server.stop();
     ui.close();

@@ -6,6 +6,10 @@ import {
   isPresenceMessage,
   isHistoryReplay,
   isTypingMessage,
+  isShellAttachMessage,
+  isShellDetachMessage,
+  isShellResizeMessage,
+  isShellDataMessage,
   type PromptMessage,
   type StreamChunk,
 } from "../protocol.js";
@@ -84,5 +88,15 @@ describe("protocol type guards", () => {
       timestamp: Date.now(),
     };
     expect(isTypingMessage(msg)).toBe(false);
+  });
+
+  it("identifies the shell messages", () => {
+    expect(isShellAttachMessage({ type: "shell_attach", user: "ada", cols: 80, rows: 24, timestamp: 1 })).toBe(true);
+    expect(isShellDetachMessage({ type: "shell_detach", user: "ada", timestamp: 1 })).toBe(true);
+    expect(isShellResizeMessage({ type: "shell_resize", cols: 100, rows: 30, timestamp: 1 })).toBe(true);
+    expect(isShellDataMessage({ type: "shell_data", data: "\x1b[2J$ ", timestamp: 1 })).toBe(true);
+    // cross-checks
+    expect(isShellAttachMessage({ type: "shell_detach", user: "ada", timestamp: 1 })).toBe(false);
+    expect(isShellDataMessage({ type: "shell_attach", user: "ada", cols: 1, rows: 1, timestamp: 1 })).toBe(false);
   });
 });

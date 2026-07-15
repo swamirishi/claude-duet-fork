@@ -33,6 +33,7 @@ function mount(role: "host" | "guest" = "host", pre?: (s: UiStore) => void) {
       onKeystroke={() => {}}
       onApproval={() => {}}
       onOpenFile={vi.fn()}
+      onShellEnter={vi.fn()}
       onQuit={() => {}}
     />,
   );

@@ -25,6 +25,12 @@ export class TerminalUI {
   private keystrokeHandler?: () => void;
   private approvalHandler?: (promptId: string, approved: boolean) => void;
   private openFileHandler?: (relPath: string) => void;
+  private shellEnterHandler?: () => void;
+
+  // Shell overlay state (fullscreen PTY takeover)
+  private shellActive = false;
+  private shellStdinHandler?: (data: string) => void;
+  private shellResizeHandler?: () => void;
 
   constructor(options: TerminalUIOptions) {
     this.options = options;
@@ -62,6 +68,10 @@ export class TerminalUI {
     this.openFileHandler = handler;
   }
 
+  onShellEnter(handler: () => void): void {
+    this.shellEnterHandler = handler;
+  }
+
   // ---- Lifecycle ----
 
   startInputLoop(): void {
@@ -76,6 +86,7 @@ export class TerminalUI {
           this.approvalHandler?.(id, ok);
         },
         onOpenFile: (rel: string) => this.openFileHandler?.(rel),
+        onShellEnter: () => this.shellEnterHandler?.(),
         onQuit: () => {
           try {
             process.kill(process.pid, "SIGINT");
@@ -130,6 +141,95 @@ export class TerminalUI {
   // The basic-auth username for the browser link (the candidate's name).
   setWebUser(user?: string): void {
     this.store.set({ webUser: user });
+  }
+
+  // Advertise that the shared interactive shell (Ctrl-T) is available.
+  setShellEnabled(enabled: boolean): void {
+    this.store.set({ shellEnabled: enabled });
+  }
+
+  // ---- Shared shell overlay (fullscreen PTY takeover) ----
+
+  isShellActive(): boolean {
+    return this.shellActive;
+  }
+
+  /** Current terminal size, for sizing the PTY / reporting on attach. */
+  terminalSize(): { cols: number; rows: number } {
+    return { cols: process.stdout.columns || 80, rows: process.stdout.rows || 24 };
+  }
+
+  /**
+   * Suspend the Ink UI and hand the raw terminal to a shared PTY. Keystrokes go
+   * to `onData` (unless readOnly); Ctrl-\ triggers `onDetach`; terminal resizes
+   * call `onResize`. `writeShell` pushes PTY output to the screen while active.
+   */
+  enterShell(opts: {
+    readOnly: boolean;
+    onData: (data: string) => void;
+    onDetach: () => void;
+    onResize: (cols: number, rows: number) => void;
+  }): void {
+    if (this.shellActive) return;
+    this.shellActive = true;
+
+    this.ink?.unmount();
+    this.ink = undefined;
+
+    const { cols, rows } = this.terminalSize();
+    // Clear screen + home cursor, then a thin header.
+    process.stdout.write("\x1b[2J\x1b[H");
+    const tag = opts.readOnly ? "read-only — watching host shell" : "live shell";
+    process.stdout.write(
+      pc.dim(`── shared shell (${tag}) · Ctrl-\\ to return to chat ──\r\n`),
+    );
+
+    const stdin = process.stdin;
+    if (stdin.isTTY) stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding("utf8");
+
+    this.shellStdinHandler = (data: string) => {
+      if (data.includes("\x1c")) {
+        // Ctrl-\ — detach. Forward anything before the sequence first.
+        const before = data.slice(0, data.indexOf("\x1c"));
+        if (before && !opts.readOnly) opts.onData(before);
+        opts.onDetach();
+        return;
+      }
+      if (!opts.readOnly) opts.onData(data);
+    };
+    stdin.on("data", this.shellStdinHandler);
+
+    this.shellResizeHandler = () => {
+      const s = this.terminalSize();
+      opts.onResize(s.cols, s.rows);
+    };
+    process.stdout.on("resize", this.shellResizeHandler);
+
+    // Tell the caller our initial size so it can size the PTY.
+    opts.onResize(cols, rows);
+  }
+
+  /** Push PTY output to the screen (no-op unless a shell overlay is active). */
+  writeShell(data: string): void {
+    if (this.shellActive) process.stdout.write(data);
+  }
+
+  /** Tear down the shell overlay and restore the Ink chat UI. */
+  exitShell(): void {
+    if (!this.shellActive) return;
+    this.shellActive = false;
+
+    const stdin = process.stdin;
+    if (this.shellStdinHandler) stdin.off("data", this.shellStdinHandler);
+    this.shellStdinHandler = undefined;
+    if (this.shellResizeHandler) process.stdout.off("resize", this.shellResizeHandler);
+    this.shellResizeHandler = undefined;
+    if (stdin.isTTY) stdin.setRawMode(false);
+
+    process.stdout.write("\x1b[2J\x1b[H");
+    this.startInputLoop(); // re-mount Ink (handlers persist on this)
   }
 
   setFsRoot(root: string): void {

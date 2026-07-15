@@ -8,6 +8,9 @@ import {
   isChatMessage,
   isTypingMessage,
   isFsOpenMessage,
+  isShellAttachMessage,
+  isShellDetachMessage,
+  isShellResizeMessage,
 } from "./protocol.js";
 import { deriveKey, encrypt, decrypt } from "./crypto.js";
 import type { DuetTransport } from "./transport.js";
@@ -17,6 +20,7 @@ export interface ServerOptions {
   password: string;
   sessionCode: string;
   approvalMode?: boolean;
+  shellEnabled?: boolean;
 }
 
 export class ClaudeDuetServer extends EventEmitter {
@@ -31,6 +35,7 @@ export class ClaudeDuetServer extends EventEmitter {
     super();
     this.options = {
       approvalMode: true,
+      shellEnabled: false,
       ...options,
     };
     this.encryptionKey = deriveKey(options.password, options.sessionCode);
@@ -123,6 +128,7 @@ export class ClaudeDuetServer extends EventEmitter {
         sessionId: "session",
         hostUser: this.options.hostUser,
         approvalMode: this.options.approvalMode,
+        shellEnabled: this.options.shellEnabled,
         timestamp: Date.now(),
       });
       this.emit("guest_joined", msg.user);
@@ -167,6 +173,21 @@ export class ClaudeDuetServer extends EventEmitter {
 
     if (isFsOpenMessage(msg)) {
       this.emit("fs_open", msg.path);
+      return;
+    }
+
+    if (isShellAttachMessage(msg)) {
+      this.emit("shell_attach", { user: this.guestUser ?? msg.user, cols: msg.cols, rows: msg.rows });
+      return;
+    }
+
+    if (isShellDetachMessage(msg)) {
+      this.emit("shell_detach", { user: this.guestUser ?? msg.user });
+      return;
+    }
+
+    if (isShellResizeMessage(msg)) {
+      this.emit("shell_resize", { cols: msg.cols, rows: msg.rows });
       return;
     }
   }
@@ -188,6 +209,7 @@ export class ClaudeDuetServer extends EventEmitter {
         sessionId: "session",
         hostUser: this.options.hostUser,
         approvalMode: this.options.approvalMode,
+        shellEnabled: this.options.shellEnabled,
         timestamp: Date.now(),
       });
       this.emit("guest_joined", msg.user);
@@ -232,6 +254,21 @@ export class ClaudeDuetServer extends EventEmitter {
 
     if (isFsOpenMessage(msg)) {
       this.emit("fs_open", msg.path);
+      return;
+    }
+
+    if (isShellAttachMessage(msg)) {
+      this.emit("shell_attach", { user: this.guestUser ?? msg.user, cols: msg.cols, rows: msg.rows });
+      return;
+    }
+
+    if (isShellDetachMessage(msg)) {
+      this.emit("shell_detach", { user: this.guestUser ?? msg.user });
+      return;
+    }
+
+    if (isShellResizeMessage(msg)) {
+      this.emit("shell_resize", { cols: msg.cols, rows: msg.rows });
       return;
     }
   }

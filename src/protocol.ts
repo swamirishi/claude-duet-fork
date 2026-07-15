@@ -48,6 +48,7 @@ export interface JoinAccepted extends BaseMessage {
   sessionId: string;
   hostUser: string;
   approvalMode: boolean;
+  shellEnabled?: boolean;    // host offers the shared interactive shell (Ctrl-T)
 }
 
 export interface JoinRejected extends BaseMessage {
@@ -179,13 +180,44 @@ export interface FsOpenMessage extends BaseMessage {
   path: string;              // relative to root
 }
 
+// ---- Shared interactive shell (fullscreen attach/detach) ----
+
+// Guest → host: attach to / detach from the shared PTY.
+export interface ShellAttachMessage extends BaseMessage {
+  type: "shell_attach";
+  user: string;
+  cols: number;
+  rows: number;
+}
+
+export interface ShellDetachMessage extends BaseMessage {
+  type: "shell_detach";
+  user: string;
+}
+
+// Guest → host: the attached client's terminal was resized.
+export interface ShellResizeMessage extends BaseMessage {
+  type: "shell_resize";
+  cols: number;
+  rows: number;
+}
+
+// Host → guest: raw PTY output bytes (a UTF-8 chunk, control sequences intact).
+export interface ShellDataMessage extends BaseMessage {
+  type: "shell_data";
+  data: string;
+}
+
 export type ClientMessage =
   | PromptMessage
   | TypingMessage
   | ApprovalResponse
   | JoinRequest
   | ChatMessage
-  | FsOpenMessage;
+  | FsOpenMessage
+  | ShellAttachMessage
+  | ShellDetachMessage
+  | ShellResizeMessage;
 
 export type ServerMessage =
   | JoinAccepted
@@ -204,7 +236,8 @@ export type ServerMessage =
   | HistoryReplayMessage
   | TypingIndicator
   | FsTreeMessage
-  | FsFileMessage;
+  | FsFileMessage
+  | ShellDataMessage;
 
 export type Message = ClientMessage | ServerMessage;
 
@@ -248,6 +281,22 @@ export function isHistoryReplay(msg: unknown): msg is HistoryReplayMessage {
 
 export function isFsOpenMessage(msg: unknown): msg is FsOpenMessage {
   return isObject(msg) && msg.type === "fs_open";
+}
+
+export function isShellAttachMessage(msg: unknown): msg is ShellAttachMessage {
+  return isObject(msg) && msg.type === "shell_attach";
+}
+
+export function isShellDetachMessage(msg: unknown): msg is ShellDetachMessage {
+  return isObject(msg) && msg.type === "shell_detach";
+}
+
+export function isShellResizeMessage(msg: unknown): msg is ShellResizeMessage {
+  return isObject(msg) && msg.type === "shell_resize";
+}
+
+export function isShellDataMessage(msg: unknown): msg is ShellDataMessage {
+  return isObject(msg) && msg.type === "shell_data";
 }
 
 function isObject(val: unknown): val is Record<string, unknown> {
