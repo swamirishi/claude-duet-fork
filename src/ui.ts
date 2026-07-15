@@ -161,8 +161,9 @@ export class TerminalUI {
 
   /**
    * Suspend the Ink UI and hand the raw terminal to a shared PTY. Keystrokes go
-   * to `onData` (unless readOnly); Ctrl-\ triggers `onDetach`; terminal resizes
-   * call `onResize`. `writeShell` pushes PTY output to the screen while active.
+   * to `onData` (unless readOnly); Ctrl-T or Ctrl-\ triggers `onDetach` (so
+   * Ctrl-T toggles the shell); terminal resizes call `onResize`. `writeShell`
+   * pushes PTY output to the screen while active.
    */
   enterShell(opts: {
     readOnly: boolean;
@@ -183,13 +184,26 @@ export class TerminalUI {
     process.stdout.write("\x1b[2J\x1b[H");
     const ctrlHint = opts.onControlKey ? " · Ctrl-] control" : "";
     process.stdout.write(
-      pc.dim(`── shared shell${opts.header ? ` (${opts.header})` : ""} · Ctrl-\\ to return to chat${ctrlHint} ──\r\n`),
+      pc.dim(`── shared shell${opts.header ? ` (${opts.header})` : ""} · Ctrl-T/Ctrl-\\ to return to chat${ctrlHint} ──\r\n`),
     );
 
     const stdin = process.stdin;
-    if (stdin.isTTY) stdin.setRawMode(true);
-    stdin.resume();
     stdin.setEncoding("utf8");
+    stdin.resume();
+    // Re-assert raw mode: Ink's unmount resets it, and that reset can land just
+    // after ours, leaving the shell in cooked/line mode (Ctrl-T→SIGINFO, broken
+    // vim). Assert now and again on the next tick to win that race.
+    const ensureRaw = () => {
+      if (stdin.isTTY) {
+        try {
+          stdin.setRawMode(true);
+        } catch {
+          /* stdin not raw-capable — nothing to do */
+        }
+      }
+    };
+    ensureRaw();
+    setImmediate(ensureRaw);
 
     this.shellStdinHandler = (data: string) => {
       // Ctrl-] (0x1d) — request/reclaim control.
@@ -197,9 +211,10 @@ export class TerminalUI {
         opts.onControlKey();
         return;
       }
-      if (data.includes("\x1c")) {
-        // Ctrl-\ — detach. Forward anything before the sequence first.
-        const before = data.slice(0, data.indexOf("\x1c"));
+      // Ctrl-T (0x14) or Ctrl-\ (0x1c) — toggle back to chat.
+      const detachIdx = [data.indexOf("\x14"), data.indexOf("\x1c")].filter((i) => i >= 0).sort((a, b) => a - b)[0];
+      if (detachIdx !== undefined) {
+        const before = data.slice(0, detachIdx);
         if (before && !opts.readOnly) opts.onData(before);
         opts.onDetach();
         return;
