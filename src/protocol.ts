@@ -208,6 +208,26 @@ export interface ShellDataMessage extends BaseMessage {
   data: string;
 }
 
+// Guest → host: raw input bytes (keystrokes) for the shared PTY. The host only
+// writes them when the guest currently holds control.
+export interface ShellInputMessage extends BaseMessage {
+  type: "shell_input";
+  data: string;
+}
+
+// Guest → host: ask to take (or, from the host, reclaim) control of the shell.
+export interface ShellControlRequestMessage extends BaseMessage {
+  type: "shell_control_request";
+  user: string;
+}
+
+// Host → guest: the guest's control request was granted (true) or the host
+// took control back (false).
+export interface ShellControlGrantMessage extends BaseMessage {
+  type: "shell_control_grant";
+  granted: boolean;
+}
+
 export type ClientMessage =
   | PromptMessage
   | TypingMessage
@@ -217,7 +237,9 @@ export type ClientMessage =
   | FsOpenMessage
   | ShellAttachMessage
   | ShellDetachMessage
-  | ShellResizeMessage;
+  | ShellResizeMessage
+  | ShellInputMessage
+  | ShellControlRequestMessage;
 
 export type ServerMessage =
   | JoinAccepted
@@ -237,7 +259,8 @@ export type ServerMessage =
   | TypingIndicator
   | FsTreeMessage
   | FsFileMessage
-  | ShellDataMessage;
+  | ShellDataMessage
+  | ShellControlGrantMessage;
 
 export type Message = ClientMessage | ServerMessage;
 
@@ -297,6 +320,18 @@ export function isShellResizeMessage(msg: unknown): msg is ShellResizeMessage {
 
 export function isShellDataMessage(msg: unknown): msg is ShellDataMessage {
   return isObject(msg) && msg.type === "shell_data";
+}
+
+export function isShellInputMessage(msg: unknown): msg is ShellInputMessage {
+  return isObject(msg) && msg.type === "shell_input";
+}
+
+export function isShellControlRequestMessage(msg: unknown): msg is ShellControlRequestMessage {
+  return isObject(msg) && msg.type === "shell_control_request";
+}
+
+export function isShellControlGrantMessage(msg: unknown): msg is ShellControlGrantMessage {
+  return isObject(msg) && msg.type === "shell_control_grant";
 }
 
 function isObject(val: unknown): val is Record<string, unknown> {

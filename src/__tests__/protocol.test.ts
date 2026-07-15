@@ -10,6 +10,9 @@ import {
   isShellDetachMessage,
   isShellResizeMessage,
   isShellDataMessage,
+  isShellInputMessage,
+  isShellControlRequestMessage,
+  isShellControlGrantMessage,
   type PromptMessage,
   type StreamChunk,
 } from "../protocol.js";
@@ -98,5 +101,14 @@ describe("protocol type guards", () => {
     // cross-checks
     expect(isShellAttachMessage({ type: "shell_detach", user: "ada", timestamp: 1 })).toBe(false);
     expect(isShellDataMessage({ type: "shell_attach", user: "ada", cols: 1, rows: 1, timestamp: 1 })).toBe(false);
+  });
+
+  it("identifies the shell control messages (Step B)", () => {
+    expect(isShellInputMessage({ type: "shell_input", data: "ls\r", timestamp: 1 })).toBe(true);
+    expect(isShellControlRequestMessage({ type: "shell_control_request", user: "ada", timestamp: 1 })).toBe(true);
+    expect(isShellControlGrantMessage({ type: "shell_control_grant", granted: true, timestamp: 1 })).toBe(true);
+    // cross-checks
+    expect(isShellInputMessage({ type: "shell_data", data: "x", timestamp: 1 })).toBe(false);
+    expect(isShellControlGrantMessage({ type: "shell_control_request", user: "ada", timestamp: 1 })).toBe(false);
   });
 });

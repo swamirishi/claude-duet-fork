@@ -272,7 +272,7 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
       {state.approval ? (
         <Box borderStyle="round" borderColor="yellow" paddingX={1}>
           <Text color="yellow">
-            Approve {state.approval.user}'s prompt? "{state.approval.text.slice(0, 48)}"  [y] approve  [n] reject
+            Approve {state.approval.user}'s request? "{state.approval.text.slice(0, 48)}"  [y] approve  [n] reject
           </Text>
         </Box>
       ) : (

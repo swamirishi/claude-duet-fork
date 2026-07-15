@@ -169,6 +169,8 @@ export class TerminalUI {
     onData: (data: string) => void;
     onDetach: () => void;
     onResize: (cols: number, rows: number) => void;
+    onControlKey?: () => void;   // Ctrl-] — request / reclaim control
+    header?: string;             // status line shown under the banner
   }): void {
     if (this.shellActive) return;
     this.shellActive = true;
@@ -179,9 +181,9 @@ export class TerminalUI {
     const { cols, rows } = this.terminalSize();
     // Clear screen + home cursor, then a thin header.
     process.stdout.write("\x1b[2J\x1b[H");
-    const tag = opts.readOnly ? "read-only — watching host shell" : "live shell";
+    const ctrlHint = opts.onControlKey ? " · Ctrl-] control" : "";
     process.stdout.write(
-      pc.dim(`── shared shell (${tag}) · Ctrl-\\ to return to chat ──\r\n`),
+      pc.dim(`── shared shell${opts.header ? ` (${opts.header})` : ""} · Ctrl-\\ to return to chat${ctrlHint} ──\r\n`),
     );
 
     const stdin = process.stdin;
@@ -190,6 +192,11 @@ export class TerminalUI {
     stdin.setEncoding("utf8");
 
     this.shellStdinHandler = (data: string) => {
+      // Ctrl-] (0x1d) — request/reclaim control.
+      if (opts.onControlKey && data.includes("\x1d")) {
+        opts.onControlKey();
+        return;
+      }
       if (data.includes("\x1c")) {
         // Ctrl-\ — detach. Forward anything before the sequence first.
         const before = data.slice(0, data.indexOf("\x1c"));

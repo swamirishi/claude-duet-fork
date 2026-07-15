@@ -113,6 +113,7 @@ export async function joinCommand(sessionCodeOrOffer: string, options: JoinOptio
 
   let messageCount = 0;
   const sessionStartTime = Date.now();
+  let hasShellControl = false;
 
   const cmdCtx: CommandContext = {
     ui,
@@ -198,17 +199,47 @@ export async function joinCommand(sessionCodeOrOffer: string, options: JoinOptio
       case "shell_data":
         ui.writeShell((msg as any).data);
         break;
+      case "shell_control_grant":
+        hasShellControl = (msg as any).granted === true;
+        if (ui.isShellActive()) {
+          ui.writeShell(
+            hasShellControl
+              ? "\r\n\x1b[32m[you have control — type freely; Ctrl-\\ to release]\x1b[0m\r\n"
+              : "\r\n\x1b[33m[control is with the host]\x1b[0m\r\n",
+          );
+        }
+        break;
     }
   });
 
-  // Ctrl-T → attach to the shared shell, read-only (host drives in Step A).
+  // Ctrl-T → attach to the shared shell. The guest watches read-only until it
+  // is granted control (Ctrl-] to request); only then do keystrokes flow.
   ui.onShellEnter(() => {
     if (ui.isShellActive()) return;
+    hasShellControl = false;
     const size = ui.terminalSize();
     ui.enterShell({
-      readOnly: true,
-      onData: () => {},
+      readOnly: false, // gated locally by hasShellControl below
+      header: "watching · Ctrl-] request control",
+      onData: (data) => {
+        if (!hasShellControl) return;
+        try {
+          client.sendShellInput(data);
+        } catch {
+          /* not connected — ignore */
+        }
+      },
+      onControlKey: () => {
+        if (hasShellControl) return;
+        try {
+          client.sendShellControlRequest();
+          ui.writeShell("\r\n\x1b[2m[requested control — waiting for host…]\x1b[0m\r\n");
+        } catch {
+          /* not connected — ignore */
+        }
+      },
       onDetach: () => {
+        hasShellControl = false;
         try {
           client.sendShellDetach();
         } catch {
