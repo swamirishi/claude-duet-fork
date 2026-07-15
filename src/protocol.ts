@@ -145,12 +145,47 @@ export interface HistoryReplayMessage extends BaseMessage {
 
 // ---- Union Types ----
 
+// ---- Filesystem view (shared project state) ----
+
+// A node in the project file tree. Paths are RELATIVE to the confined root
+// (the candidate's working directory); the root itself has path "".
+export interface FsNode {
+  name: string;
+  path: string;              // relative to root; "" for the root
+  type: "file" | "dir";
+  changed?: boolean;         // recently created/modified
+  children?: FsNode[];       // present on directories
+}
+
+// Host → guest: a fresh snapshot of the project tree.
+export interface FsTreeMessage extends BaseMessage {
+  type: "fs_tree";
+  root: string;              // absolute root path (display only)
+  tree: FsNode;
+}
+
+// Host → guest: the contents of a file the guest asked to open.
+export interface FsFileMessage extends BaseMessage {
+  type: "fs_file";
+  path: string;              // relative to root
+  content: string;
+  truncated: boolean;
+  error?: string;
+}
+
+// Guest → host: request to open/read a file from the shared tree.
+export interface FsOpenMessage extends BaseMessage {
+  type: "fs_open";
+  path: string;              // relative to root
+}
+
 export type ClientMessage =
   | PromptMessage
   | TypingMessage
   | ApprovalResponse
   | JoinRequest
-  | ChatMessage;
+  | ChatMessage
+  | FsOpenMessage;
 
 export type ServerMessage =
   | JoinAccepted
@@ -167,7 +202,9 @@ export type ServerMessage =
   | ErrorMessage
   | ChatReceived
   | HistoryReplayMessage
-  | TypingIndicator;
+  | TypingIndicator
+  | FsTreeMessage
+  | FsFileMessage;
 
 export type Message = ClientMessage | ServerMessage;
 
@@ -207,6 +244,10 @@ export function isTypingMessage(msg: unknown): msg is TypingMessage {
 
 export function isHistoryReplay(msg: unknown): msg is HistoryReplayMessage {
   return isObject(msg) && msg.type === "history_replay";
+}
+
+export function isFsOpenMessage(msg: unknown): msg is FsOpenMessage {
+  return isObject(msg) && msg.type === "fs_open";
 }
 
 function isObject(val: unknown): val is Record<string, unknown> {

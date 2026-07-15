@@ -15,6 +15,7 @@ export interface ClaudeBridgeOptions {
   allowedTools?: string[];     // override default tool list (auto mode)
   cwd?: string;
   permissionServerPort?: number; // for interactive mode hook setup
+  effort?: string;             // reasoning effort: low|medium|high|xhigh|max
 }
 
 export type ClaudeEvent =
@@ -225,7 +226,27 @@ export class ClaudeBridge extends EventEmitter {
     // For interactive mode, we don't pass --allowedTools.
     // The host command will set up a PermissionRequest hook using permissionServerPort.
 
+    if (this.options.effort) args.push("--effort", this.options.effort);
+
     return args;
+  }
+
+  getEffort(): string | undefined {
+    return this.options.effort;
+  }
+
+  /**
+   * Change the reasoning effort mid-session. Because --effort is a launch flag,
+   * this relaunches Claude Code with --resume so the conversation is preserved.
+   */
+  async setEffort(level: string): Promise<void> {
+    if (this.options.effort === level) return;
+    this.options.effort = level;
+    const sid = this.sessionId;
+    await this.stop();               // SIGTERM → exit code null → no error emitted
+    this.options.continue = false;
+    if (sid) this.options.resume = sid;
+    await this.start();
   }
 
   /**

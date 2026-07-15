@@ -21,6 +21,7 @@ program
   .option("-c, --continue", "resume most recent Claude Code session")
   .option("--resume <id>", "resume a specific Claude Code session by ID")
   .option("--permission-mode <mode>", "permission mode: auto (default) or interactive")
+  .option("--effort <level>", "reasoning effort: low | medium | high | xhigh | max")
   .action(async (options) => {
     console.log("  Starting session...");
     const { hostCommand } = await import("./commands/host.js");
@@ -36,6 +37,7 @@ program
       continueSession: options.continue || false,
       resumeSession: options.resume,
       permissionMode: options.permissionMode || config.permissionMode || "auto",
+      effort: options.effort,
     });
   });
 

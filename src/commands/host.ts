@@ -8,6 +8,8 @@ import { handleSlashCommand, type CommandContext } from "./session-commands.js";
 import { parseSessionHistory, getProjectSessionDir } from "../history.js";
 import { createOffer } from "../peer.js";
 import { copyToClipboard } from "../clipboard.js";
+import { FsWatcher } from "../fswatch.js";
+import type { FsNode } from "../protocol.js";
 import { join } from "node:path";
 import * as readline from "node:readline";
 
@@ -20,6 +22,7 @@ interface HostOptions {
   continueSession?: boolean;
   resumeSession?: string;
   permissionMode?: PermissionMode;
+  effort?: string;
 }
 
 export async function hostCommand(options: HostOptions): Promise<void> {
@@ -41,6 +44,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     continue: options.continueSession,
     resume: options.resumeSession,
     permissionMode: options.permissionMode ?? "auto",
+    effort: options.effort,
   });
 
   // Register event handler BEFORE start() to catch early errors
@@ -164,7 +168,37 @@ export async function hostCommand(options: HostOptions): Promise<void> {
   }
 
   ui.startInputLoop();
-  ui.showHint("Type a message to chat, or @claude <prompt> to ask Claude. /help for commands.");
+  ui.showHint("chat · @claude <prompt> · ↑↓ scroll chat · Tab: chat/tree/viewer · Enter open · /help");
+
+  // Filesystem panel — watch the project (Claude's working dir), confined to it.
+  const fsWatcher = new FsWatcher(process.cwd());
+  ui.setFsRoot(fsWatcher.root);
+  let latestTree: FsNode | undefined;
+  fsWatcher.on("tree", (tree: FsNode) => {
+    latestTree = tree;
+    ui.setFsTree(tree);
+    server.broadcast({ type: "fs_tree", root: fsWatcher.root, tree, timestamp: Date.now() });
+  });
+  fsWatcher.start();
+
+  // Host opens a file locally (confined read).
+  ui.onOpenFile(async (rel) => {
+    const res = await fsWatcher.readFile(rel);
+    ui.setFileContent(rel, res.content, res.truncated, res.error);
+  });
+
+  // Guest asked to open a file — serve it (confined read) over the wire.
+  server.on("fs_open", async (rel: string) => {
+    const res = await fsWatcher.readFile(rel);
+    server.broadcast({
+      type: "fs_file",
+      path: rel,
+      content: res.content,
+      truncated: res.truncated,
+      error: res.error,
+      timestamp: Date.now(),
+    });
+  });
 
   const router = new PromptRouter(claude, server, {
     hostUser: options.name,
@@ -206,6 +240,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
       });
       connInfo?.cleanup?.();
       peerCleanup?.();
+      fsWatcher.stop();
       await claude.stop();
       await server.stop();
       ui.close();
@@ -217,12 +252,27 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     onKick: () => {
       server.kickGuest();
     },
+    onEffort: async (level: string) => {
+      ui.showSystem(`Reloading Claude at effort=${level} (conversation preserved)…`);
+      server.broadcast({ type: "notice", message: `Host set Claude effort to ${level}.`, timestamp: Date.now() });
+      try {
+        await claude.setEffort(level);
+        ui.showSystem(`Effort is now ${level}.`);
+      } catch (err) {
+        ui.showError(`Failed to change effort: ${err instanceof Error ? err.message : err}`);
+      }
+    },
   };
 
   server.on("guest_joined", async (user: string) => {
     sessionManager.addGuest(session.code, user);
     ui.showPartnerJoined(user);
     cmdCtx.partnerName = user;
+
+    // Send the current project tree so the guest's panel populates immediately.
+    if (latestTree) {
+      server.broadcast({ type: "fs_tree", root: fsWatcher.root, tree: latestTree, timestamp: Date.now() });
+    }
 
     // Send session history to guest if resuming an existing session
     const claudeSessionId = claude.getSessionId();
@@ -356,6 +406,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     });
     connInfo?.cleanup?.();
     peerCleanup?.();
+    fsWatcher.stop();
     await claude.stop();
     await server.stop();
     ui.close();
