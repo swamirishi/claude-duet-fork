@@ -143,6 +143,11 @@ export class TerminalUI {
     this.store.set({ webUser: user });
   }
 
+  // Local URL where the interviewer approves candidate check-ins (identity gate).
+  setApproveLink(url?: string): void {
+    this.store.set({ approveLink: url });
+  }
+
   // Advertise that the shared interactive shell (Ctrl-T) is available.
   setShellEnabled(enabled: boolean): void {
     this.store.set({ shellEnabled: enabled });
@@ -161,8 +166,9 @@ export class TerminalUI {
 
   /**
    * Suspend the Ink UI and hand the raw terminal to a shared PTY. Keystrokes go
-   * to `onData` (unless readOnly); Ctrl-\ triggers `onDetach`; terminal resizes
-   * call `onResize`. `writeShell` pushes PTY output to the screen while active.
+   * to `onData` (unless readOnly); Ctrl-T or Ctrl-\ triggers `onDetach` (so
+   * Ctrl-T toggles the shell); terminal resizes call `onResize`. `writeShell`
+   * pushes PTY output to the screen while active.
    */
   enterShell(opts: {
     readOnly: boolean;
@@ -183,13 +189,26 @@ export class TerminalUI {
     process.stdout.write("\x1b[2J\x1b[H");
     const ctrlHint = opts.onControlKey ? " · Ctrl-] control" : "";
     process.stdout.write(
-      pc.dim(`── shared shell${opts.header ? ` (${opts.header})` : ""} · Ctrl-\\ to return to chat${ctrlHint} ──\r\n`),
+      pc.dim(`── shared shell${opts.header ? ` (${opts.header})` : ""} · Ctrl-T/Ctrl-\\ to return to chat${ctrlHint} ──\r\n`),
     );
 
     const stdin = process.stdin;
-    if (stdin.isTTY) stdin.setRawMode(true);
-    stdin.resume();
     stdin.setEncoding("utf8");
+    stdin.resume();
+    // Re-assert raw mode: Ink's unmount resets it, and that reset can land just
+    // after ours, leaving the shell in cooked/line mode (Ctrl-T→SIGINFO, broken
+    // vim). Assert now and again on the next tick to win that race.
+    const ensureRaw = () => {
+      if (stdin.isTTY) {
+        try {
+          stdin.setRawMode(true);
+        } catch {
+          /* stdin not raw-capable — nothing to do */
+        }
+      }
+    };
+    ensureRaw();
+    setImmediate(ensureRaw);
 
     this.shellStdinHandler = (data: string) => {
       // Ctrl-] (0x1d) — request/reclaim control.
@@ -197,9 +216,10 @@ export class TerminalUI {
         opts.onControlKey();
         return;
       }
-      if (data.includes("\x1c")) {
-        // Ctrl-\ — detach. Forward anything before the sequence first.
-        const before = data.slice(0, data.indexOf("\x1c"));
+      // Ctrl-T (0x14) or Ctrl-\ (0x1c) — toggle back to chat.
+      const detachIdx = [data.indexOf("\x14"), data.indexOf("\x1c")].filter((i) => i >= 0).sort((a, b) => a - b)[0];
+      if (detachIdx !== undefined) {
+        const before = data.slice(0, detachIdx);
         if (before && !opts.readOnly) opts.onData(before);
         opts.onDetach();
         return;
@@ -337,22 +357,15 @@ export class TerminalUI {
 
   showToolUse(tool: string, input: Record<string, unknown>): void {
     this.store.endStream();
-    this.store.addMessage({ id: this.nextId("tool"), type: "tool", text: tool, timestamp: 0 });
-    // Mirror activity into the terminal pane: Bash as a shell command, others as a tagged line.
-    if (tool.toLowerCase() === "bash" && typeof input.command === "string") {
-      this.store.addTerminal([`$ ${input.command as string}`]);
-    } else {
-      const detail = (input.file_path || input.path || input.pattern || input.query || "") as string;
-      this.store.addTerminal([`[${tool}]${detail ? " " + detail : ""}`]);
-    }
+    const detail = (input.command || input.file_path || input.path || input.pattern || input.query || "") as string;
+    const text = detail ? `${tool}: ${detail}` : tool;
+    this.store.addMessage({ id: this.nextId("tool"), type: "tool", text, timestamp: 0 });
   }
 
   showToolResult(tool: string, output: string): void {
     this.store.endStream();
     const trimmed = output.length > 120 ? output.slice(0, 117) + "…" : output;
     this.store.addMessage({ id: this.nextId("toolres"), type: "tool", text: `${tool}: ${trimmed}`, timestamp: 0 });
-    const lines = String(output).replace(/\s+$/, "").split("\n").slice(0, 300);
-    this.store.addTerminal(lines);
   }
 
   showTurnComplete(cost: number, durationMs: number): void {

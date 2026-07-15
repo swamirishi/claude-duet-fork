@@ -70,6 +70,16 @@ describe("App render", () => {
     unmount();
   });
 
+  it("pins the approve URL when an identity gate is running", () => {
+    const { lastFrame, unmount } = mount("host", (s) =>
+      s.set({ approveLink: "http://localhost:8090" }),
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("approve candidates here");
+    expect(frame).toContain("localhost:8090");
+    unmount();
+  });
+
   it("shows the file viewer with an opened file's contents", () => {
     const { lastFrame, unmount } = mount("host", (s) =>
       s.set({ fsFilePath: "README.md", fsFileContent: "# Hello World", focus: "viewer" }),

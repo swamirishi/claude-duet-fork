@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { EventEmitter } from "node:events";
-import type { ClientMessage, ServerMessage } from "./protocol.js";
+import { nanoid } from "nanoid";
+import type { ServerMessage } from "./protocol.js";
 import {
   isJoinRequest,
   isPromptMessage,
@@ -25,16 +26,29 @@ export interface ServerOptions {
   shellEnabled?: boolean;
 }
 
+const P2P_ID = "p2p"; // synthetic guest id for the single P2P transport peer
+
+/**
+ * Session server. Supports MANY guests over WebSocket (tunnel/LAN) — anyone with
+ * the password joins as a watcher; `broadcast` fans out to all of them. The
+ * single P2P transport peer (when used) is treated as one more guest. Inbound
+ * messages are attributed to the sending connection. The shared shell is
+ * exclusive: at most one guest holds control at a time (`shellControllerId`);
+ * only that guest's keystrokes are forwarded, and control grants are targeted.
+ */
 export class ClaudeDuetServer extends EventEmitter {
   private wss?: WebSocketServer;
-  private guest?: WebSocket;
+  private guests = new Map<WebSocket, { id: string; user: string }>();
   private guestTransport?: DuetTransport;
-  private guestUser?: string;
+  private guestTransportUser?: string;
+  private guestSizes = new Map<string, { cols: number; rows: number }>();
+  private shellControllerId: string | null = null; // null => host drives
   private options: Required<ServerOptions>;
   private encryptionKey: Uint8Array;
 
   constructor(options: ServerOptions) {
     super();
+    this.setMaxListeners(0);
     this.options = {
       approvalMode: true,
       shellEnabled: false,
@@ -56,10 +70,7 @@ export class ClaudeDuetServer extends EventEmitter {
   }
 
   attachTransport(transport: DuetTransport): void {
-    if (this.guest || this.guestTransport) {
-      return;
-    }
-
+    if (this.guestTransport) return;
     this.guestTransport = transport;
 
     transport.on("message", (data: string) => {
@@ -75,25 +86,20 @@ export class ClaudeDuetServer extends EventEmitter {
     transport.on("close", () => {
       if (transport === this.guestTransport) {
         this.guestTransport = undefined;
-        this.guestUser = undefined;
+        this.guestTransportUser = undefined;
+        this.guestSizes.delete(P2P_ID);
+        if (this.shellControllerId === P2P_ID) {
+          this.shellControllerId = null;
+          this.emit("shell_control_released");
+        }
         this.emit("guest_left");
       }
     });
   }
 
   private handleConnection(ws: WebSocket): void {
-    // Only allow one guest
-    if (this.guest || this.guestTransport) {
-      const payload: ServerMessage = {
-        type: "join_rejected",
-        reason: "Session is full",
-        timestamp: Date.now(),
-      };
-      ws.send(encrypt(JSON.stringify(payload), this.encryptionKey));
-      ws.close();
-      return;
-    }
-
+    // No cap — every authenticated connection is a watcher. Eviction is never
+    // needed; a stale socket simply drops out of the guest map on close.
     ws.on("message", (data) => {
       try {
         const decrypted = decrypt(data.toString(), this.encryptionKey);
@@ -105,247 +111,191 @@ export class ClaudeDuetServer extends EventEmitter {
     });
 
     ws.on("close", () => {
-      if (ws === this.guest) {
-        this.guest = undefined;
-        this.guestUser = undefined;
-        this.emit("guest_left");
+      const g = this.guests.get(ws);
+      if (!g) return;
+      this.guests.delete(ws);
+      this.guestSizes.delete(g.id);
+      if (this.shellControllerId === g.id) {
+        this.shellControllerId = null;
+        this.emit("shell_control_released");
       }
+      this.emit("guest_left", g.user);
     });
   }
 
   private handleTransportMessage(transport: DuetTransport, msg: unknown): void {
     if (isJoinRequest(msg)) {
       if (msg.passwordHash !== this.options.password) {
-        this.sendTransport(transport, {
-          type: "join_rejected",
-          reason: "Invalid password",
-          timestamp: Date.now(),
-        });
+        this.sendTransport(transport, { type: "join_rejected", reason: "Invalid password", timestamp: Date.now() });
         return;
       }
       this.guestTransport = transport;
-      this.guestUser = msg.user;
-      this.sendTransport(transport, {
-        type: "join_accepted",
-        sessionId: "session",
-        hostUser: this.options.hostUser,
-        approvalMode: this.options.approvalMode,
-        shellEnabled: this.options.shellEnabled,
-        timestamp: Date.now(),
-      });
+      this.guestTransportUser = msg.user;
+      this.sendTransport(transport, this.joinAccepted());
       this.emit("guest_joined", msg.user);
       return;
     }
-
-    if (isPromptMessage(msg)) {
-      msg.user = this.guestUser!;
-      msg.source = "guest";
-      this.emit("prompt", msg);
-      return;
-    }
-
-    if (isApprovalResponse(msg)) {
-      this.emit("approval_response", msg);
-      return;
-    }
-
-    if (isChatMessage(msg)) {
-      msg.user = this.guestUser!;
-      msg.source = "guest";
-      this.broadcast({
-        type: "chat_received",
-        user: msg.user,
-        text: msg.text,
-        source: "guest",
-        timestamp: Date.now(),
-      });
-      this.emit("chat", msg);
-      return;
-    }
-
-    if (isTypingMessage(msg)) {
-      this.emit("server_message", {
-        type: "typing_indicator",
-        user: this.guestUser!,
-        isTyping: msg.isTyping,
-        timestamp: Date.now(),
-      });
-      return;
-    }
-
-    if (isFsOpenMessage(msg)) {
-      this.emit("fs_open", msg.path);
-      return;
-    }
-
-    if (isShellAttachMessage(msg)) {
-      this.emit("shell_attach", { user: this.guestUser ?? msg.user, cols: msg.cols, rows: msg.rows });
-      return;
-    }
-
-    if (isShellDetachMessage(msg)) {
-      this.emit("shell_detach", { user: this.guestUser ?? msg.user });
-      return;
-    }
-
-    if (isShellResizeMessage(msg)) {
-      this.emit("shell_resize", { cols: msg.cols, rows: msg.rows });
-      return;
-    }
-
-    if (isShellInputMessage(msg)) {
-      this.emit("shell_input", msg.data);
-      return;
-    }
-
-    if (isShellControlRequestMessage(msg)) {
-      this.emit("shell_control_request", { user: this.guestUser ?? msg.user });
-      return;
-    }
+    this.routeGuestMessage(msg, P2P_ID, () => this.guestTransportUser ?? "guest");
   }
 
   private handleMessage(ws: WebSocket, msg: unknown): void {
     if (isJoinRequest(msg)) {
       if (msg.passwordHash !== this.options.password) {
-        this.send(ws, {
-          type: "join_rejected",
-          reason: "Invalid password",
-          timestamp: Date.now(),
-        });
+        this.send(ws, { type: "join_rejected", reason: "Invalid password", timestamp: Date.now() });
         return;
       }
-      this.guest = ws;
-      this.guestUser = msg.user;
-      this.send(ws, {
-        type: "join_accepted",
-        sessionId: "session",
-        hostUser: this.options.hostUser,
-        approvalMode: this.options.approvalMode,
-        shellEnabled: this.options.shellEnabled,
-        timestamp: Date.now(),
-      });
+      const id = nanoid(8);
+      this.guests.set(ws, { id, user: msg.user });
+      this.send(ws, this.joinAccepted());
       this.emit("guest_joined", msg.user);
       return;
     }
+    const g = this.guests.get(ws);
+    if (!g) return; // not joined yet
+    this.routeGuestMessage(msg, g.id, () => g.user);
+  }
 
+  /** Shared inbound handling for a guest (ws or transport), attributed by id/user. */
+  private routeGuestMessage(msg: unknown, id: string, user: () => string): void {
     if (isPromptMessage(msg)) {
-      msg.user = this.guestUser!;
+      msg.user = user();
       msg.source = "guest";
       this.emit("prompt", msg);
       return;
     }
-
     if (isApprovalResponse(msg)) {
       this.emit("approval_response", msg);
       return;
     }
-
     if (isChatMessage(msg)) {
-      msg.user = this.guestUser!;
+      msg.user = user();
       msg.source = "guest";
-      this.broadcast({
-        type: "chat_received",
-        user: msg.user,
-        text: msg.text,
-        source: "guest",
-        timestamp: Date.now(),
-      });
+      this.broadcast({ type: "chat_received", user: msg.user, text: msg.text, source: "guest", timestamp: Date.now() });
       this.emit("chat", msg);
       return;
     }
-
     if (isTypingMessage(msg)) {
-      this.emit("server_message", {
-        type: "typing_indicator",
-        user: this.guestUser!,
-        isTyping: msg.isTyping,
-        timestamp: Date.now(),
-      });
+      this.emit("server_message", { type: "typing_indicator", user: user(), isTyping: msg.isTyping, timestamp: Date.now() });
       return;
     }
-
     if (isFsOpenMessage(msg)) {
       this.emit("fs_open", msg.path);
       return;
     }
-
     if (isShellAttachMessage(msg)) {
-      this.emit("shell_attach", { user: this.guestUser ?? msg.user, cols: msg.cols, rows: msg.rows });
+      this.guestSizes.set(id, { cols: msg.cols, rows: msg.rows });
+      this.emit("shell_attach", { id, user: user(), cols: msg.cols, rows: msg.rows });
       return;
     }
-
     if (isShellDetachMessage(msg)) {
-      this.emit("shell_detach", { user: this.guestUser ?? msg.user });
+      if (this.shellControllerId === id) {
+        this.shellControllerId = null;
+        this.emit("shell_control_released");
+      }
+      this.emit("shell_detach", { id, user: user() });
       return;
     }
-
     if (isShellResizeMessage(msg)) {
-      this.emit("shell_resize", { cols: msg.cols, rows: msg.rows });
+      this.guestSizes.set(id, { cols: msg.cols, rows: msg.rows });
+      this.emit("shell_resize", { id, cols: msg.cols, rows: msg.rows });
       return;
     }
-
     if (isShellInputMessage(msg)) {
-      this.emit("shell_input", msg.data);
+      // Only the controlling guest may drive the PTY.
+      if (this.shellControllerId === id) this.emit("shell_input", msg.data);
       return;
     }
-
     if (isShellControlRequestMessage(msg)) {
-      this.emit("shell_control_request", { user: this.guestUser ?? msg.user });
+      this.emit("shell_control_request", { id, user: user() });
       return;
     }
+  }
+
+  private joinAccepted(): ServerMessage {
+    return {
+      type: "join_accepted",
+      sessionId: "session",
+      hostUser: this.options.hostUser,
+      approvalMode: this.options.approvalMode,
+      shellEnabled: this.options.shellEnabled,
+      timestamp: Date.now(),
+    };
+  }
+
+  // ---- Shared shell control (host-driven) ----
+
+  /** Grant PTY control to a guest id, or null to return control to the host. */
+  setShellController(id: string | null): void {
+    this.shellControllerId = id;
+    for (const [ws, g] of this.guests) {
+      this.send(ws, { type: "shell_control_grant", granted: g.id === id, timestamp: Date.now() });
+    }
+    if (this.guestTransport) {
+      this.sendTransport(this.guestTransport, { type: "shell_control_grant", granted: id === P2P_ID, timestamp: Date.now() });
+    }
+  }
+
+  /** Last-reported terminal size for a guest id (for sizing the PTY on grant). */
+  guestSize(id: string): { cols: number; rows: number } | undefined {
+    return this.guestSizes.get(id);
   }
 
   broadcast(msg: ServerMessage): void {
     const encrypted = encrypt(JSON.stringify(msg), this.encryptionKey);
-
-    if (this.guest?.readyState === WebSocket.OPEN) {
-      this.guest.send(encrypted);
-    } else if (this.guestTransport?.isOpen()) {
-      this.guestTransport.send(encrypted);
+    for (const ws of this.guests.keys()) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(encrypted);
     }
-
-    // Also emit locally for host TUI
+    if (this.guestTransport?.isOpen()) this.guestTransport.send(encrypted);
+    // Also emit locally for the host TUI.
     this.emit("server_message", msg);
+  }
+
+  /** Send a message to just one guest by id (used for per-attach shell snapshots). */
+  sendToGuest(id: string, msg: ServerMessage): void {
+    if (id === P2P_ID) {
+      if (this.guestTransport) this.sendTransport(this.guestTransport, msg);
+      return;
+    }
+    for (const [ws, g] of this.guests) {
+      if (g.id === id) {
+        this.send(ws, msg);
+        return;
+      }
+    }
   }
 
   private send(ws: WebSocket, msg: ServerMessage): void {
     if (ws.readyState === WebSocket.OPEN) {
-      const encrypted = encrypt(JSON.stringify(msg), this.encryptionKey);
-      ws.send(encrypted);
+      ws.send(encrypt(JSON.stringify(msg), this.encryptionKey));
     }
   }
 
   private sendTransport(transport: DuetTransport, msg: ServerMessage): void {
     if (transport.isOpen()) {
-      const encrypted = encrypt(JSON.stringify(msg), this.encryptionKey);
-      transport.send(encrypted);
+      transport.send(encrypt(JSON.stringify(msg), this.encryptionKey));
     }
   }
 
   kickGuest(): void {
-    if (this.guest) {
-      this.send(this.guest, {
-        type: "error",
-        message: "You have been disconnected by the host.",
-        timestamp: Date.now(),
-      });
-      this.guest.close();
-      this.guest = undefined;
-      this.guestUser = undefined;
-    } else if (this.guestTransport) {
-      this.sendTransport(this.guestTransport, {
-        type: "error",
-        message: "You have been disconnected by the host.",
-        timestamp: Date.now(),
-      });
+    const bye: ServerMessage = { type: "error", message: "You have been disconnected by the host.", timestamp: Date.now() };
+    for (const ws of this.guests.keys()) {
+      this.send(ws, bye);
+      ws.close();
+    }
+    this.guests.clear();
+    if (this.guestTransport) {
+      this.sendTransport(this.guestTransport, bye);
       this.guestTransport.close();
       this.guestTransport = undefined;
-      this.guestUser = undefined;
+      this.guestTransportUser = undefined;
     }
+    this.guestSizes.clear();
+    this.shellControllerId = null;
   }
 
   async stop(): Promise<void> {
-    this.guest?.close();
+    for (const ws of this.guests.keys()) ws.close();
+    this.guests.clear();
     this.guestTransport?.close();
     return new Promise((resolve) => {
       if (this.wss) {
@@ -357,10 +307,15 @@ export class ClaudeDuetServer extends EventEmitter {
   }
 
   isGuestConnected(): boolean {
-    return (this.guest?.readyState === WebSocket.OPEN) || (this.guestTransport?.isOpen() ?? false);
+    return this.guests.size > 0 || (this.guestTransport?.isOpen() ?? false);
+  }
+
+  guestCount(): number {
+    return this.guests.size + (this.guestTransport?.isOpen() ? 1 : 0);
   }
 
   getGuestUser(): string | undefined {
-    return this.guestUser;
+    const first = this.guests.values().next().value as { user: string } | undefined;
+    return first?.user ?? this.guestTransportUser;
   }
 }

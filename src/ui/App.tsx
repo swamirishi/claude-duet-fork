@@ -17,7 +17,7 @@ interface AppProps {
 }
 
 const HOST_CMDS = ["/trust", "/approval", "/kick", "/effort "];
-const BASE_CMDS = ["@claude ", "/help", "/status", "/clear", "/leave", "/end", "/quit"];
+const BASE_CMDS = ["@claude ", "/help", "/status", "/clear", "/shell", "/leave", "/end", "/quit"];
 
 export function ghostCompletion(input: string, role: "host" | "guest"): string | null {
   if (!input) return null;
@@ -44,9 +44,10 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
   const sidebarWidth = Math.max(28, Math.min(52, Math.floor(cols * 0.42)));
   const showJoinInfo = state.role === "host" && !!state.sessionCode;
   const showWebLink = showJoinInfo && !!state.webLink;
+  const showApprove = showJoinInfo && !!state.approveLink;
   // Chrome rows: StatusBar (3) + input bar (3) + hint (1) = 7; host join banner up
-  // to 2 more, plus 1 for the pinned candidate browser link when present.
-  const bodyHeight = Math.max(4, rows - 7 - (showJoinInfo ? 2 : 0) - (showWebLink ? 2 : 0));
+  // to 2 more, +2 for the pinned candidate link, +1 for the approve line.
+  const bodyHeight = Math.max(4, rows - 7 - (showJoinInfo ? 2 : 0) - (showWebLink ? 2 : 0) - (showApprove ? 1 : 0));
   const treeHeight = Math.max(4, Math.floor(bodyHeight / 2));
   const viewerHeight = Math.max(4, bodyHeight - treeHeight);
 
@@ -58,8 +59,6 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
   const indicatorLines = (state.claudeProcessing ? 1 : 0) + (state.typingUser ? 1 : 0);
   const chatHeight = Math.max(1, bodyHeight - indicatorLines);
   const maxChatScroll = Math.max(0, buildLines(state.messages, chatTextWidth).length - chatHeight);
-  const viewerMode: "terminal" | "file" = state.fsFilePath ? "file" : "terminal";
-  const maxTermScroll = Math.max(0, state.terminal.length - Math.max(1, viewerHeight - 1));
   const scrollChat = (delta: number) =>
     store.set({ chatScroll: Math.min(maxChatScroll, Math.max(0, store.state.chatScroll + delta)) });
 
@@ -136,21 +135,13 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
     if (state.focus === "viewer") {
       if (key.tab) return cycleFocus();
       if (key.escape && store.state.fsFilePath) {
-        // back to the terminal view
+        // close the file
         return store.set({ fsFilePath: undefined, fsFileContent: undefined, fsFileError: undefined });
       }
-      if (viewerMode === "file") {
-        if (key.upArrow) return store.set({ fsViewOffset: Math.max(0, store.state.fsViewOffset - 1) });
-        if (key.downArrow) return store.set({ fsViewOffset: store.state.fsViewOffset + 1 });
-        if (key.pageUp) return store.set({ fsViewOffset: Math.max(0, store.state.fsViewOffset - viewerHeight) });
-        if (key.pageDown) return store.set({ fsViewOffset: store.state.fsViewOffset + viewerHeight });
-      } else {
-        const clampT = (n: number) => Math.min(maxTermScroll, Math.max(0, n));
-        if (key.upArrow) return store.set({ terminalScroll: clampT(store.state.terminalScroll + 1) });
-        if (key.downArrow) return store.set({ terminalScroll: clampT(store.state.terminalScroll - 1) });
-        if (key.pageUp) return store.set({ terminalScroll: clampT(store.state.terminalScroll + viewerHeight) });
-        if (key.pageDown) return store.set({ terminalScroll: clampT(store.state.terminalScroll - viewerHeight) });
-      }
+      if (key.upArrow) return store.set({ fsViewOffset: Math.max(0, store.state.fsViewOffset - 1) });
+      if (key.downArrow) return store.set({ fsViewOffset: store.state.fsViewOffset + 1 });
+      if (key.pageUp) return store.set({ fsViewOffset: Math.max(0, store.state.fsViewOffset - viewerHeight) });
+      if (key.pageDown) return store.set({ fsViewOffset: store.state.fsViewOffset + viewerHeight });
       return;
     }
 
@@ -202,6 +193,13 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
       />
       {showJoinInfo ? (
         <Box flexDirection="column" paddingX={1} width={cols}>
+          {showApprove ? (
+            <Text wrap="wrap">
+              <Text color="yellow" bold>✔ approve candidates here — </Text>
+              <Text bold color="yellow">{state.approveLink}</Text>
+              <Text dimColor> (open in your browser)</Text>
+            </Text>
+          ) : null}
           {showWebLink ? (
             <Text wrap="wrap">
               <Text color="green" bold>▶ send candidate this link — </Text>
@@ -256,14 +254,11 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
             rootName={rootName}
           />
           <FileViewer
-            mode={viewerMode}
             path={state.fsFilePath}
             content={state.fsFileContent}
             truncated={state.fsFileTruncated}
             error={state.fsFileError}
             offset={state.fsViewOffset}
-            terminal={state.terminal}
-            terminalScroll={state.terminalScroll}
             focused={state.focus === "viewer"}
             height={viewerHeight}
           />

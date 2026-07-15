@@ -105,21 +105,38 @@ export async function joinCommand(sessionCodeOrOffer: string, options: JoinOptio
   }
   if (result.shellEnabled) {
     ui.setShellEnabled(true);
-    ui.showSystem("Shared shell available — press Ctrl-T to watch it (read-only).");
+    ui.showSystem("Shared shell: type /shell to open it (in a browser use /shell, not Ctrl-T). Then just type to request control.");
   }
   console.log("");
   ui.startInputLoop();
-  ui.showHint("chat · @claude <prompt> · ↑↓ scroll chat · Tab: chat/tree/viewer · Enter open · /help");
+  ui.showHint(
+    `chat · @claude <prompt> · Tab: chat/tree/viewer · ↑↓ scroll${result.shellEnabled ? " · Ctrl-T or /shell: shell" : ""} · /help`,
+  );
 
   let messageCount = 0;
   const sessionStartTime = Date.now();
   let hasShellControl = false;
+  let controlRequested = false;
+
+  // Ask the host for shell control (once until answered). Called explicitly via
+  // Ctrl-] and implicitly when a read-only guest starts typing.
+  const requestShellControl = () => {
+    if (hasShellControl || controlRequested) return;
+    controlRequested = true;
+    try {
+      client.sendShellControlRequest();
+      ui.writeShell("\r\n\x1b[33m[you don't have control yet — asking the host…]\x1b[0m\r\n");
+    } catch {
+      controlRequested = false; // not connected — let them retry
+    }
+  };
 
   const cmdCtx: CommandContext = {
     ui,
     role: "guest",
     partnerName: result.hostUser,
     startTime: sessionStartTime,
+    onShell: result.shellEnabled ? () => openShell() : undefined,
     onLeave: async () => {
       const elapsed = Date.now() - sessionStartTime;
       const minutes = Math.floor(elapsed / 60000);
@@ -201,43 +218,42 @@ export async function joinCommand(sessionCodeOrOffer: string, options: JoinOptio
         break;
       case "shell_control_grant":
         hasShellControl = (msg as any).granted === true;
+        controlRequested = false; // answered — allow future requests
         if (ui.isShellActive()) {
           ui.writeShell(
             hasShellControl
               ? "\r\n\x1b[32m[you have control — type freely; Ctrl-\\ to release]\x1b[0m\r\n"
-              : "\r\n\x1b[33m[control is with the host]\x1b[0m\r\n",
+              : "\r\n\x1b[33m[control is with the host — press Ctrl-] or type to request]\x1b[0m\r\n",
           );
         }
         break;
     }
   });
 
-  // Ctrl-T → attach to the shared shell. The guest watches read-only until it
-  // is granted control (Ctrl-] to request); only then do keystrokes flow.
-  ui.onShellEnter(() => {
+  // Open the shared shell. Triggered by Ctrl-T (host terminals) and by the
+  // /shell command (the reliable path in a browser, where Ctrl-T opens a tab).
+  // The guest watches read-only until granted control; typing requests it.
+  const openShell = () => {
     if (ui.isShellActive()) return;
     hasShellControl = false;
+    controlRequested = false;
     const size = ui.terminalSize();
     ui.enterShell({
       readOnly: false, // gated locally by hasShellControl below
-      header: "watching · Ctrl-] request control",
+      header: "watching · type (or Ctrl-]) to request control",
       onData: (data) => {
-        if (!hasShellControl) return;
-        try {
-          client.sendShellInput(data);
-        } catch {
-          /* not connected — ignore */
+        if (hasShellControl) {
+          try {
+            client.sendShellInput(data);
+          } catch {
+            /* not connected — ignore */
+          }
+          return;
         }
+        // Read-only: typing implicitly asks for control instead of vanishing.
+        requestShellControl();
       },
-      onControlKey: () => {
-        if (hasShellControl) return;
-        try {
-          client.sendShellControlRequest();
-          ui.writeShell("\r\n\x1b[2m[requested control — waiting for host…]\x1b[0m\r\n");
-        } catch {
-          /* not connected — ignore */
-        }
-      },
+      onControlKey: () => requestShellControl(),
       onDetach: () => {
         hasShellControl = false;
         try {
@@ -260,7 +276,8 @@ export async function joinCommand(sessionCodeOrOffer: string, options: JoinOptio
     } catch {
       /* not connected — ignore */
     }
-  });
+  };
+  ui.onShellEnter(openShell);
 
   // Opening a file from the shared tree asks the host to serve its contents.
   ui.onOpenFile((rel) => {
