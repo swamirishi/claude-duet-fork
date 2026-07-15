@@ -109,7 +109,9 @@ export async function joinCommand(sessionCodeOrOffer: string, options: JoinOptio
   }
   console.log("");
   ui.startInputLoop();
-  ui.showHint("chat · @claude <prompt> · ↑↓ scroll chat · Tab: chat/tree/viewer · Enter open · /help");
+  ui.showHint(
+    `chat · @claude <prompt> · Tab: chat/tree/viewer · ↑↓ scroll${result.shellEnabled ? " · Ctrl-T or /shell: shell" : ""} · /help`,
+  );
 
   let messageCount = 0;
   const sessionStartTime = Date.now();
