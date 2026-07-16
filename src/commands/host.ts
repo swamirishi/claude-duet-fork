@@ -35,6 +35,7 @@ interface HostOptions {
   interviewerUid?: number; // the interviewer's private shell runs as this uid (default: host's)
   interviewerGid?: number;
   interviewerHome?: string; // HOME for the interviewer's private shell
+  interviewerRoot?: string; // extra dir shown ONLY in the host's file tree (e.g. /records)
 }
 
 export async function hostCommand(options: HostOptions): Promise<void> {
@@ -213,15 +214,55 @@ export async function hostCommand(options: HostOptions): Promise<void> {
   const fsWatcher = new FsWatcher(process.cwd());
   ui.setFsRoot(fsWatcher.root);
   let latestTree: FsNode | undefined;
+
+  // Per-role views: guests only ever see /workspace (broadcast). The interviewer
+  // additionally sees an extra dir (e.g. the protected /records) merged into
+  // their OWN tree under a "records/" prefix — never broadcast to guests.
+  const REC_PREFIX = "records/";
+  const recordsWatcher = options.interviewerRoot ? new FsWatcher(options.interviewerRoot) : undefined;
+  let latestRecords: FsNode | undefined;
+  const prefixPaths = (nodes: FsNode[] | undefined, prefix: string): FsNode[] =>
+    (nodes ?? []).map((n) => ({ ...n, path: prefix + n.path, children: n.children ? prefixPaths(n.children, prefix) : undefined }));
+  const renderHostTree = () => {
+    if (!recordsWatcher) {
+      ui.setFsTree(latestTree ?? { name: "project", path: "", type: "dir", children: [] });
+      return;
+    }
+    const wsChildren = latestTree?.children ?? [];
+    const recChildren = prefixPaths(latestRecords?.children, REC_PREFIX);
+    ui.setFsTree({
+      name: "session",
+      path: "",
+      type: "dir",
+      children: [
+        { name: "workspace", path: "__ws", type: "dir", children: wsChildren },
+        { name: "records (interviewer only)", path: "__rec", type: "dir", children: recChildren },
+      ],
+    });
+  };
+
   fsWatcher.on("tree", (tree: FsNode) => {
     latestTree = tree;
-    ui.setFsTree(tree);
+    renderHostTree();
     server.broadcast({ type: "fs_tree", root: fsWatcher.root, tree, timestamp: Date.now() });
   });
   fsWatcher.start();
+  if (recordsWatcher) {
+    recordsWatcher.on("tree", (tree: FsNode) => {
+      latestRecords = tree;
+      renderHostTree();
+    });
+    recordsWatcher.start();
+  }
 
-  // Host opens a file locally (confined read).
+  // Host opens a file locally (confined read) — route records/ paths to the
+  // records watcher, everything else to the workspace watcher.
   ui.onOpenFile(async (rel) => {
+    if (recordsWatcher && rel.startsWith(REC_PREFIX)) {
+      const res = await recordsWatcher.readFile(rel.slice(REC_PREFIX.length));
+      ui.setFileContent(rel, res.content, res.truncated, res.error);
+      return;
+    }
     const res = await fsWatcher.readFile(rel);
     ui.setFileContent(rel, res.content, res.truncated, res.error);
   });
@@ -411,6 +452,8 @@ export async function hostCommand(options: HostOptions): Promise<void> {
       connInfo?.cleanup?.();
       peerCleanup?.();
       fsWatcher.stop();
+
+      recordsWatcher?.stop();
       candidateShell?.dispose();
 
       interviewerShell?.dispose();
@@ -587,6 +630,8 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     connInfo?.cleanup?.();
     peerCleanup?.();
     fsWatcher.stop();
+
+    recordsWatcher?.stop();
     candidateShell?.dispose();
 
     interviewerShell?.dispose();

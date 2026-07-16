@@ -32,6 +32,7 @@ program
   .option("--interviewer-uid <uid>", "run the interviewer's private shell as this uid")
   .option("--interviewer-gid <gid>", "run the interviewer's private shell as this gid")
   .option("--interviewer-home <path>", "HOME for the interviewer's private shell")
+  .option("--interviewer-root <path>", "extra dir shown only in the host's file tree (e.g. records)")
   .action(async (options) => {
     console.log("  Starting session...");
     const { hostCommand } = await import("./commands/host.js");
@@ -58,6 +59,7 @@ program
       interviewerUid: options.interviewerUid !== undefined ? parseInt(options.interviewerUid, 10) : undefined,
       interviewerGid: options.interviewerGid !== undefined ? parseInt(options.interviewerGid, 10) : undefined,
       interviewerHome: options.interviewerHome,
+      interviewerRoot: options.interviewerRoot,
     });
   });
 
