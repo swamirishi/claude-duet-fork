@@ -12,6 +12,7 @@ export interface CommandContext {
   onEffort?: (level: string) => void;
   onShell?: () => void;
   onWatch?: () => void;
+  questionText?: string;
 }
 
 const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
@@ -56,6 +57,18 @@ export function handleSlashCommand(input: string, ctx: CommandContext): boolean 
       // Works everywhere (Ctrl-T is a browser shortcut, so the candidate needs this).
       // Host: opens your private interviewer shell. Guest: your candidate shell.
       ctx.onShell();
+      return true;
+
+    case "question":
+    case "q":
+      if (!ctx.questionText) {
+        ctx.ui.showSystem("No interview question was loaded for this session.");
+        return true;
+      }
+      ctx.ui.showSystem("");
+      ctx.ui.showSystem("── Interview question ──");
+      for (const line of ctx.questionText.split("\n")) ctx.ui.showSystem(line || " ");
+      ctx.ui.showSystem("────────────────────────");
       return true;
 
     case "watch":
@@ -128,6 +141,9 @@ function showHelp(ctx: CommandContext): void {
   ui.showSystem("  /help        — Show this help");
   ui.showSystem("  /status      — Show session info");
   ui.showSystem("  /clear       — Clear the terminal");
+  if (ctx.questionText) {
+    ui.showSystem("  /question    — Print the full interview question");
+  }
   if (ctx.onShell) {
     ui.showSystem(
       ctx.role === "host"

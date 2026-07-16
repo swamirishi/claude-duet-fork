@@ -1,9 +1,19 @@
 #!/usr/bin/env node
 
 import { Command } from "commander";
+import { readFileSync } from "node:fs";
 import { loadConfig } from "./config.js";
 
 const program = new Command();
+
+function readQuestion(path?: string): string | undefined {
+  if (!path) return undefined;
+  try {
+    return readFileSync(path, "utf8").trim() || undefined;
+  } catch {
+    return undefined; // missing/unreadable question file — just skip the box
+  }
+}
 
 program
   .name("claude-duet")
@@ -33,6 +43,7 @@ program
   .option("--interviewer-gid <gid>", "run the interviewer's private shell as this gid")
   .option("--interviewer-home <path>", "HOME for the interviewer's private shell")
   .option("--interviewer-root <path>", "extra dir shown only in the host's file tree (e.g. records)")
+  .option("--question-file <path>", "markdown file shown in the pinned question box on startup")
   .action(async (options) => {
     console.log("  Starting session...");
     const { hostCommand } = await import("./commands/host.js");
@@ -60,6 +71,7 @@ program
       interviewerGid: options.interviewerGid !== undefined ? parseInt(options.interviewerGid, 10) : undefined,
       interviewerHome: options.interviewerHome,
       interviewerRoot: options.interviewerRoot,
+      question: readQuestion(options.questionFile),
     });
   });
 

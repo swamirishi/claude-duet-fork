@@ -153,6 +153,11 @@ export class TerminalUI {
     this.store.set({ shellEnabled: enabled });
   }
 
+  // The interview question (markdown) shown in the pinned box.
+  setQuestion(text?: string): void {
+    this.store.set({ question: text });
+  }
+
   // ---- Shared shell overlay (fullscreen PTY takeover) ----
 
   isShellActive(): boolean {

@@ -208,6 +208,12 @@ export interface ShellDataMessage extends BaseMessage {
   data: string;
 }
 
+// Host → guest: the interview question (markdown), shown in the pinned box.
+export interface QuestionMessage extends BaseMessage {
+  type: "question";
+  text: string;
+}
+
 // Guest → host: raw input bytes (keystrokes) for the shared PTY. The host only
 // writes them when the guest currently holds control.
 export interface ShellInputMessage extends BaseMessage {
@@ -260,7 +266,8 @@ export type ServerMessage =
   | FsTreeMessage
   | FsFileMessage
   | ShellDataMessage
-  | ShellControlGrantMessage;
+  | ShellControlGrantMessage
+  | QuestionMessage;
 
 export type Message = ClientMessage | ServerMessage;
 

@@ -36,6 +36,7 @@ interface HostOptions {
   interviewerGid?: number;
   interviewerHome?: string; // HOME for the interviewer's private shell
   interviewerRoot?: string; // extra dir shown ONLY in the host's file tree (e.g. /records)
+  question?: string;        // interview question (markdown) shown in the pinned box
 }
 
 export async function hostCommand(options: HostOptions): Promise<void> {
@@ -62,6 +63,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
   if (options.webLink) ui.setWebLink(options.webLink);
   if (options.webUser) ui.setWebUser(options.webUser);
   if (options.approveLink) ui.setApproveLink(options.approveLink);
+  if (options.question) ui.setQuestion(options.question);
 
   // Create server first so event handler can reference it
   const server = new ClaudeDuetServer({
@@ -435,6 +437,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     startTime: sessionStartTime,
     onShell: options.allowShell ? () => openInterviewerShell?.() : undefined,
     onWatch: options.allowShell ? () => watchCandidateShell?.() : undefined,
+    questionText: options.question,
     onLeave: async () => {
       // Notify guest before shutting down
       server.broadcast({
@@ -485,6 +488,11 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     sessionManager.addGuest(session.code, user);
     ui.showPartnerJoined(user);
     cmdCtx.partnerName = user;
+
+    // Send the interview question so the guest's box populates on join.
+    if (options.question) {
+      server.broadcast({ type: "question", text: options.question, timestamp: Date.now() });
+    }
 
     // Send the current project tree so the guest's panel populates immediately.
     if (latestTree) {

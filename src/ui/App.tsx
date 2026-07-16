@@ -4,6 +4,7 @@ import { StatusBar } from "./StatusBar.js";
 import { ChatView, buildLines } from "./ChatView.js";
 import { FileTree, flattenTree } from "./FileTree.js";
 import { FileViewer } from "./FileViewer.js";
+import { QuestionBox } from "./QuestionBox.js";
 import { UiStore, useUiState } from "./store.js";
 
 interface AppProps {
@@ -17,7 +18,7 @@ interface AppProps {
 }
 
 const HOST_CMDS = ["/trust", "/approval", "/kick", "/effort "];
-const BASE_CMDS = ["@claude ", "/help", "/status", "/clear", "/shell", "/watch", "/leave", "/end", "/quit"];
+const BASE_CMDS = ["@claude ", "/help", "/status", "/clear", "/question", "/shell", "/watch", "/leave", "/end", "/quit"];
 
 export function ghostCompletion(input: string, role: "host" | "guest"): string | null {
   if (!input) return null;
@@ -57,7 +58,9 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
   const chatColWidth = cols - sidebarWidth - 1;
   const chatTextWidth = Math.max(10, chatColWidth - 1);
   const indicatorLines = (state.claudeProcessing ? 1 : 0) + (state.typingUser ? 1 : 0);
-  const chatHeight = Math.max(1, bodyHeight - indicatorLines);
+  // Question box pinned at the top of the chat column (up to ~40% of the pane).
+  const questionHeight = state.question ? Math.min(10, Math.max(4, Math.floor(bodyHeight * 0.4))) : 0;
+  const chatHeight = Math.max(1, bodyHeight - indicatorLines - questionHeight);
   const maxChatScroll = Math.max(0, buildLines(state.messages, chatTextWidth).length - chatHeight);
   const scrollChat = (delta: number) =>
     store.set({ chatScroll: Math.min(maxChatScroll, Math.max(0, store.state.chatScroll + delta)) });
@@ -233,6 +236,9 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
       ) : null}
       <Box flexGrow={1}>
         <Box flexDirection="column" width={chatColWidth} height={bodyHeight}>
+          {state.question && questionHeight > 0 ? (
+            <QuestionBox question={state.question} width={chatColWidth} height={questionHeight} />
+          ) : null}
           <ChatView messages={state.messages} width={chatTextWidth} height={chatHeight} scroll={state.chatScroll} />
           {state.claudeProcessing ? <Text dimColor>  ✦ Claude is thinking…</Text> : null}
           {state.typingUser ? <Text dimColor>  ✎ {state.typingUser} is typing…</Text> : null}

@@ -70,6 +70,17 @@ describe("App render", () => {
     unmount();
   });
 
+  it("renders the interview question box (formatted) at the top of chat", () => {
+    const { lastFrame, unmount } = mount("host", (s) =>
+      s.set({ question: "# LRU cache\nImplement an **LRU** cache with these methods." }),
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("📋 Question");
+    expect(frame).toContain("LRU cache");                       // header (# stripped)
+    expect(frame).toContain("Implement an LRU cache");          // inline ** stripped
+    unmount();
+  });
+
   it("pins the approve URL when an identity gate is running", () => {
     const { lastFrame, unmount } = mount("host", (s) =>
       s.set({ approveLink: "http://localhost:8090" }),
