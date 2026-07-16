@@ -11,6 +11,7 @@ export interface CommandContext {
   onKick?: () => void;
   onEffort?: (level: string) => void;
   onShell?: () => void;
+  onWatch?: () => void;
 }
 
 const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
@@ -53,7 +54,20 @@ export function handleSlashCommand(input: string, ctx: CommandContext): boolean 
         return true;
       }
       // Works everywhere (Ctrl-T is a browser shortcut, so the candidate needs this).
+      // Host: opens your private interviewer shell. Guest: your candidate shell.
       ctx.onShell();
+      return true;
+
+    case "watch":
+      if (ctx.role !== "host") {
+        ctx.ui.showSystem("Only the host can watch the candidate's shell.");
+        return true;
+      }
+      if (!ctx.onWatch) {
+        ctx.ui.showSystem("The shared shell isn't enabled for this session.");
+        return true;
+      }
+      ctx.onWatch();
       return true;
 
     case "trust":
@@ -115,7 +129,14 @@ function showHelp(ctx: CommandContext): void {
   ui.showSystem("  /status      — Show session info");
   ui.showSystem("  /clear       — Clear the terminal");
   if (ctx.onShell) {
-    ui.showSystem("  /shell       — Open the shared shell (Ctrl-\\ to return; type to request control)");
+    ui.showSystem(
+      ctx.role === "host"
+        ? "  /shell       — Open YOUR private shell (Ctrl-T; Ctrl-\\ to return)"
+        : "  /shell       — Open the shell (Ctrl-\\ to return; type to request control)",
+    );
+  }
+  if (ctx.onWatch) {
+    ui.showSystem("  /watch       — Watch the candidate's shell, read-only");
   }
   ui.showSystem("  /leave       — Leave the session");
   if (ctx.role === "host") {

@@ -59,6 +59,16 @@ describe("session commands", () => {
     expect(onShell).toHaveBeenCalledTimes(2);
   });
 
+  it("/watch is host-only and calls onWatch", () => {
+    const onWatch = vi.fn();
+    const host = createMockContext({ role: "host", onWatch });
+    expect(handleSlashCommand("/watch", host)).toBe(true);
+    expect(onWatch).toHaveBeenCalledTimes(1);
+    const guest = createMockContext({ role: "guest", onWatch: vi.fn() });
+    handleSlashCommand("/watch", guest);
+    expect((guest.onWatch as any)).not.toHaveBeenCalled();
+  });
+
   it("/shell reports when the shell isn't enabled", () => {
     const ctx = createMockContext({ onShell: undefined });
     expect(handleSlashCommand("/shell", ctx)).toBe(true);

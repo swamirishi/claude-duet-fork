@@ -29,6 +29,9 @@ program
   .option("--run-as-uid <uid>", "run Claude + the candidate shell as this uid (sandbox)")
   .option("--run-as-gid <gid>", "run Claude + the candidate shell as this gid")
   .option("--record-file <path>", "append the full transcript to this file (interviewer-only)")
+  .option("--interviewer-uid <uid>", "run the interviewer's private shell as this uid")
+  .option("--interviewer-gid <gid>", "run the interviewer's private shell as this gid")
+  .option("--interviewer-home <path>", "HOME for the interviewer's private shell")
   .action(async (options) => {
     console.log("  Starting session...");
     const { hostCommand } = await import("./commands/host.js");
@@ -52,6 +55,9 @@ program
       runAsUid: options.runAsUid !== undefined ? parseInt(options.runAsUid, 10) : undefined,
       runAsGid: options.runAsGid !== undefined ? parseInt(options.runAsGid, 10) : undefined,
       recordFile: options.recordFile,
+      interviewerUid: options.interviewerUid !== undefined ? parseInt(options.interviewerUid, 10) : undefined,
+      interviewerGid: options.interviewerGid !== undefined ? parseInt(options.interviewerGid, 10) : undefined,
+      interviewerHome: options.interviewerHome,
     });
   });
 
