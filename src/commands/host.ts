@@ -12,6 +12,7 @@ import { FsWatcher } from "../fswatch.js";
 import { newPtyShellSession, type PtyShellSession } from "../shell.js";
 import type { FsNode } from "../protocol.js";
 import { join } from "node:path";
+import { createWriteStream, type WriteStream } from "node:fs";
 import * as readline from "node:readline";
 
 interface HostOptions {
@@ -28,6 +29,14 @@ interface HostOptions {
   webUser?: string;
   approveLink?: string;
   allowShell?: boolean;
+  runAsUid?: number;   // sandbox Claude + the candidate shell as this uid
+  runAsGid?: number;
+  recordFile?: string; // append the full transcript (prompts/responses/tools) here
+  interviewerUid?: number; // the interviewer's private shell runs as this uid (default: host's)
+  interviewerGid?: number;
+  interviewerHome?: string; // HOME for the interviewer's private shell
+  interviewerRoot?: string; // extra dir shown ONLY in the host's file tree (e.g. /records)
+  question?: string;        // interview question (markdown) shown in the pinned box
 }
 
 export async function hostCommand(options: HostOptions): Promise<void> {
@@ -36,9 +45,25 @@ export async function hostCommand(options: HostOptions): Promise<void> {
   const approvalMode = !options.noApproval;
 
   const ui = new TerminalUI({ userName: options.name, role: "host" });
+
+  // Append-only transcript recorder. The host process (privileged) writes it to
+  // a directory the candidate has no access to, so it can't be read or tampered.
+  let recordStream: WriteStream | undefined;
+  if (options.recordFile) {
+    try {
+      recordStream = createWriteStream(options.recordFile, { flags: "a" });
+    } catch {
+      /* recording is best-effort — never block the session on it */
+    }
+  }
+  const record = (entry: Record<string, unknown>) => {
+    if (recordStream) recordStream.write(JSON.stringify({ ts: Date.now(), ...entry }) + "\n");
+  };
+
   if (options.webLink) ui.setWebLink(options.webLink);
   if (options.webUser) ui.setWebUser(options.webUser);
   if (options.approveLink) ui.setApproveLink(options.approveLink);
+  if (options.question) ui.setQuestion(options.question);
 
   // Create server first so event handler can reference it
   const server = new ClaudeDuetServer({
@@ -54,6 +79,8 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     resume: options.resumeSession,
     permissionMode: options.permissionMode ?? "auto",
     effort: options.effort,
+    uid: options.runAsUid,
+    gid: options.runAsGid,
   });
 
   // Register event handler BEFORE start() to catch early errors
@@ -62,18 +89,22 @@ export async function hostCommand(options: HostOptions): Promise<void> {
       case "stream_chunk":
         ui.showStreamChunk(event.text);
         server.broadcast({ ...event, timestamp: Date.now() });
+        record({ kind: "assistant", text: event.text });
         break;
       case "tool_use":
         ui.showToolUse(event.tool, event.input);
         server.broadcast({ ...event, timestamp: Date.now() });
+        record({ kind: "tool_use", tool: event.tool, input: event.input });
         break;
       case "tool_result":
         ui.showToolResult(event.tool, event.output);
         server.broadcast({ ...event, timestamp: Date.now() });
+        record({ kind: "tool_result", tool: event.tool, output: event.output });
         break;
       case "turn_complete":
         ui.showTurnComplete(event.cost, event.durationMs);
         server.broadcast({ ...event, timestamp: Date.now() });
+        record({ kind: "turn_complete", cost: event.cost, durationMs: event.durationMs });
         break;
       case "notice":
         ui.showSystem(event.message);
@@ -178,22 +209,62 @@ export async function hostCommand(options: HostOptions): Promise<void> {
 
   ui.startInputLoop();
   ui.showHint(
-    `chat · @claude <prompt> · Tab: chat/tree/viewer · ↑↓ scroll${options.allowShell ? " · Ctrl-T shell" : ""} · /help`,
+    `chat · @claude <prompt> · Tab: chat/tree/viewer · ↑↓ scroll${options.allowShell ? " · Ctrl-T your shell · /watch candidate" : ""} · /help`,
   );
 
   // Filesystem panel — watch the project (Claude's working dir), confined to it.
   const fsWatcher = new FsWatcher(process.cwd());
   ui.setFsRoot(fsWatcher.root);
   let latestTree: FsNode | undefined;
+
+  // Per-role views: guests only ever see /workspace (broadcast). The interviewer
+  // additionally sees an extra dir (e.g. the protected /records) merged into
+  // their OWN tree under a "records/" prefix — never broadcast to guests.
+  const REC_PREFIX = "records/";
+  const recordsWatcher = options.interviewerRoot ? new FsWatcher(options.interviewerRoot) : undefined;
+  let latestRecords: FsNode | undefined;
+  const prefixPaths = (nodes: FsNode[] | undefined, prefix: string): FsNode[] =>
+    (nodes ?? []).map((n) => ({ ...n, path: prefix + n.path, children: n.children ? prefixPaths(n.children, prefix) : undefined }));
+  const renderHostTree = () => {
+    if (!recordsWatcher) {
+      ui.setFsTree(latestTree ?? { name: "project", path: "", type: "dir", children: [] });
+      return;
+    }
+    const wsChildren = latestTree?.children ?? [];
+    const recChildren = prefixPaths(latestRecords?.children, REC_PREFIX);
+    ui.setFsTree({
+      name: "session",
+      path: "",
+      type: "dir",
+      children: [
+        { name: "workspace", path: "__ws", type: "dir", children: wsChildren },
+        { name: "records (interviewer only)", path: "__rec", type: "dir", children: recChildren },
+      ],
+    });
+  };
+
   fsWatcher.on("tree", (tree: FsNode) => {
     latestTree = tree;
-    ui.setFsTree(tree);
+    renderHostTree();
     server.broadcast({ type: "fs_tree", root: fsWatcher.root, tree, timestamp: Date.now() });
   });
   fsWatcher.start();
+  if (recordsWatcher) {
+    recordsWatcher.on("tree", (tree: FsNode) => {
+      latestRecords = tree;
+      renderHostTree();
+    });
+    recordsWatcher.start();
+  }
 
-  // Host opens a file locally (confined read).
+  // Host opens a file locally (confined read) — route records/ paths to the
+  // records watcher, everything else to the workspace watcher.
   ui.onOpenFile(async (rel) => {
+    if (recordsWatcher && rel.startsWith(REC_PREFIX)) {
+      const res = await recordsWatcher.readFile(rel.slice(REC_PREFIX.length));
+      ui.setFileContent(rel, res.content, res.truncated, res.error);
+      return;
+    }
     const res = await fsWatcher.readFile(rel);
     ui.setFileContent(rel, res.content, res.truncated, res.error);
   });
@@ -211,100 +282,71 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     });
   });
 
-  // Shared interactive shell. Many guests watch the same PTY; at most one holds
-  // control at a time (host by default). A guest requests control (gated by
-  // approval mode); the server enforces that only the controller's keystrokes
-  // reach the PTY and targets control grants to the right guest.
-  let shell: PtyShellSession | undefined;
-  // Resolves a "shell-control:<id>" approval from the single onApproval handler.
+  // Two shells with different views:
+  //  • candidateShell — runs as the unprivileged candidate; the candidate drives
+  //    it (requesting control, gated by approval) and every guest watches it. The
+  //    interviewer can watch it read-only (/watch). Broadcast to guests.
+  //  • interviewerShell — the interviewer's OWN shell (Ctrl-T), spawned with the
+  //    interviewer's privileges. Private: never broadcast to guests.
+  let candidateShell: PtyShellSession | undefined;
+  let interviewerShell: PtyShellSession | undefined;
   let resolveShellControl: ((id: string, approved: boolean) => void) | undefined;
-  // Opens the host's fullscreen shell; wired to Ctrl-T and the /shell command.
-  let hostShellOpener: (() => void) | undefined;
+  let openInterviewerShell: (() => void) | undefined;  // Ctrl-T / host /shell
+  let watchCandidateShell: (() => void) | undefined;    // host /watch
   if (options.allowShell) {
     const hostSize = ui.terminalSize();
-    shell = newPtyShellSession({ cwd: process.cwd(), cols: hostSize.cols, rows: hostSize.rows });
+    candidateShell = newPtyShellSession({
+      cwd: process.cwd(),
+      cols: hostSize.cols,
+      rows: hostSize.rows,
+      uid: options.runAsUid,
+      gid: options.runAsGid,
+    });
     ui.setShellEnabled(true);
 
-    let controllerId: string | null = null;        // guest id driving, or null = host
-    const pendingControl = new Map<string, string>(); // id -> requesting user (awaiting approval)
+    let controllerId: string | null = null;           // which guest drives the candidate shell
+    let hostWatching = false;                          // is the host viewing the candidate shell?
+    const pendingControl = new Map<string, string>();  // id -> requesting user (awaiting approval)
 
-    const giveControlToHost = () => {
-      controllerId = null;
-      const s = ui.terminalSize();
-      shell!.resize(s.cols, s.rows);
-      server.setShellController(null);
-    };
     const giveControlToGuest = (id: string, user: string) => {
       controllerId = id;
       const size = server.guestSize(id);
-      if (size) shell!.resize(size.cols, size.rows);
+      if (size) candidateShell!.resize(size.cols, size.rows);
       server.setShellController(id);
-      ui.showSystem(`${user} now controls the shell — press Ctrl-] to reclaim.`);
+      ui.showSystem(`${user} now controls the candidate shell.`);
     };
 
-    // PTY output → host screen (when attached) + every watching guest.
-    shell.on("data", (chunk: string) => {
-      ui.writeShell(chunk);
+    // Candidate PTY output → the host screen (only while watching) + all guests.
+    candidateShell.on("data", (chunk: string) => {
+      if (hostWatching) ui.writeShell(chunk);
       server.broadcast({ type: "shell_data", data: chunk, timestamp: Date.now() });
     });
-    shell.on("exit", () => {
-      if (ui.isShellActive()) ui.exitShell();
-      ui.showSystem("Shell exited.");
+    candidateShell.on("exit", () => {
+      if (hostWatching && ui.isShellActive()) ui.exitShell();
+      ui.showSystem("Candidate shell exited.");
     });
 
-    // Host presses Ctrl-T → take over the screen. Host input reaches the PTY
-    // only while the host is the controller; Ctrl-] reclaims from a guest.
-    const openHostShell = () => {
-      if (!shell || ui.isShellActive()) return;
-      ui.enterShell({
-        readOnly: false,
-        header: "you drive · Ctrl-] reclaim",
-        onData: (data) => {
-          if (controllerId === null) shell!.write(data);
-        },
-        onControlKey: () => {
-          if (controllerId !== null) giveControlToHost();
-        },
-        onDetach: () => ui.exitShell(),
-        onResize: (cols, rows) => {
-          if (controllerId === null) shell!.resize(cols, rows);
-        },
-      });
-      ui.writeShell(shell.snapshot()); // repaint recent output
-    };
-    ui.onShellEnter(openHostShell);   // Ctrl-T (native terminal)
-    hostShellOpener = openHostShell;  // exposed to the /shell command
-
-    // A guest attached → send just that guest a snapshot so it repaints.
     server.on("shell_attach", (info: { id: string }) => {
-      if (shell) server.sendToGuest(info.id, { type: "shell_data", data: shell.snapshot(), timestamp: Date.now() });
+      server.sendToGuest(info.id, { type: "shell_data", data: candidateShell!.snapshot(), timestamp: Date.now() });
     });
-    // The controlling guest resized → match the PTY to it.
     server.on("shell_resize", (info: { id: string; cols: number; rows: number }) => {
-      if (info.id === controllerId) shell!.resize(info.cols, info.rows);
+      if (info.id === controllerId) candidateShell!.resize(info.cols, info.rows);
     });
-    // Only the controller's keystrokes arrive here (server-enforced).
     server.on("shell_input", (data: string) => {
-      if (controllerId !== null) shell!.write(data);
+      if (controllerId !== null) candidateShell!.write(data);   // server already limits to the controller
     });
-    // Guest requests control → approve (if approval mode) or grant immediately.
     server.on("shell_control_request", (info: { id: string; user: string }) => {
-      if (info.id === controllerId) return; // already controls
+      if (info.id === controllerId) return;
       if (approvalMode) {
         pendingControl.set(info.id, info.user);
-        ui.showApprovalRequest(`shell-control:${info.id}`, info.user, "wants control of the shared shell");
+        ui.showApprovalRequest(`shell-control:${info.id}`, info.user, "wants to use the shell");
       } else {
         giveControlToGuest(info.id, info.user);
       }
     });
-    // The controller detached or disconnected → control returns to the host.
     server.on("shell_control_released", () => {
       controllerId = null;
-      const s = ui.terminalSize();
-      shell!.resize(s.cols, s.rows);
     });
-
-    // Called by the single approval handler (below) for shell-control prompts.
     resolveShellControl = (id: string, approved: boolean) => {
       const user = pendingControl.get(id) ?? "guest";
       pendingControl.delete(id);
@@ -312,9 +354,59 @@ export async function hostCommand(options: HostOptions): Promise<void> {
         giveControlToGuest(id, user);
       } else {
         server.sendToGuest(id, { type: "shell_control_grant", granted: false, timestamp: Date.now() });
-        ui.showSystem(`Shell control request from ${user} denied.`);
+        ui.showSystem(`Shell request from ${user} denied.`);
       }
     };
+
+    // Host watches the candidate's shell (read-only). Candidate can't see this.
+    watchCandidateShell = () => {
+      if (ui.isShellActive() || !candidateShell) return;
+      hostWatching = true;
+      ui.enterShell({
+        readOnly: true,
+        header: "watching candidate shell — read-only · Ctrl-\\ back",
+        onData: () => {},
+        onDetach: () => {
+          hostWatching = false;
+          ui.exitShell();
+        },
+        onResize: () => {},
+      });
+      ui.writeShell(candidateShell.snapshot());
+    };
+
+    // Host's own private shell (Ctrl-T), spawned with the interviewer's
+    // privileges — never broadcast, so the candidate never sees it.
+    openInterviewerShell = () => {
+      if (ui.isShellActive()) return;
+      if (!interviewerShell) {
+        const sz = ui.terminalSize();
+        interviewerShell = newPtyShellSession({
+          cwd: process.cwd(),
+          cols: sz.cols,
+          rows: sz.rows,
+          uid: options.interviewerUid,
+          gid: options.interviewerGid,
+          env: options.interviewerHome
+            ? ({ ...process.env, HOME: options.interviewerHome, USER: "interviewer" } as NodeJS.ProcessEnv)
+            : process.env,
+        });
+        interviewerShell.on("data", (d: string) => ui.writeShell(d)); // host screen only
+        interviewerShell.on("exit", () => {
+          if (ui.isShellActive()) ui.exitShell();
+          interviewerShell = undefined;
+        });
+      }
+      ui.enterShell({
+        readOnly: false,
+        header: "your private shell (interviewer) · Ctrl-\\ back",
+        onData: (data) => interviewerShell!.write(data),
+        onDetach: () => ui.exitShell(),
+        onResize: (cols, rows) => interviewerShell!.resize(cols, rows),
+      });
+      ui.writeShell(interviewerShell.snapshot());
+    };
+    ui.onShellEnter(openInterviewerShell); // Ctrl-T → interviewer's own shell
   }
 
   const router = new PromptRouter(claude, server, {
@@ -324,11 +416,13 @@ export async function hostCommand(options: HostOptions): Promise<void> {
 
   server.on("prompt", (msg) => {
     ui.showUserPrompt(msg.user, msg.text, "guest", "claude");
+    record({ kind: "prompt", user: msg.user, source: "guest", text: msg.text });
     router.handlePrompt(msg);
   });
 
   server.on("chat", (msg) => {
     ui.showUserPrompt(msg.user, msg.text, "guest", "chat");
+    record({ kind: "chat", user: msg.user, source: "guest", text: msg.text });
   });
 
   let messageCount = 0;
@@ -341,7 +435,9 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     sessionCode: session.code,
     partnerName: undefined,
     startTime: sessionStartTime,
-    onShell: options.allowShell ? () => hostShellOpener?.() : undefined,
+    onShell: options.allowShell ? () => openInterviewerShell?.() : undefined,
+    onWatch: options.allowShell ? () => watchCandidateShell?.() : undefined,
+    questionText: options.question,
     onLeave: async () => {
       // Notify guest before shutting down
       server.broadcast({
@@ -359,7 +455,12 @@ export async function hostCommand(options: HostOptions): Promise<void> {
       connInfo?.cleanup?.();
       peerCleanup?.();
       fsWatcher.stop();
-      shell?.dispose();
+
+      recordsWatcher?.stop();
+      candidateShell?.dispose();
+
+      interviewerShell?.dispose();
+      recordStream?.end();
       await claude.stop();
       await server.stop();
       ui.close();
@@ -387,6 +488,11 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     sessionManager.addGuest(session.code, user);
     ui.showPartnerJoined(user);
     cmdCtx.partnerName = user;
+
+    // Send the interview question so the guest's box populates on join.
+    if (options.question) {
+      server.broadcast({ type: "question", text: options.question, timestamp: Date.now() });
+    }
 
     // Send the current project tree so the guest's panel populates immediately.
     if (latestTree) {
@@ -477,6 +583,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
         timestamp: Date.now(),
       };
       ui.showUserPrompt(options.name, prompt, "host", "claude");
+      record({ kind: "prompt", user: options.name, source: "host", text: prompt });
       ui.showClaudeThinking();
       router.handlePrompt(msg);
     } else {
@@ -531,7 +638,12 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     connInfo?.cleanup?.();
     peerCleanup?.();
     fsWatcher.stop();
-    shell?.dispose();
+
+    recordsWatcher?.stop();
+    candidateShell?.dispose();
+
+    interviewerShell?.dispose();
+    recordStream?.end();
     await claude.stop();
     await server.stop();
     ui.close();

@@ -16,6 +16,8 @@ export interface ClaudeBridgeOptions {
   cwd?: string;
   permissionServerPort?: number; // for interactive mode hook setup
   effort?: string;             // reasoning effort: low|medium|high|xhigh|max
+  uid?: number;                // run the claude process (and its Bash tools) as this uid
+  gid?: number;                // ...and this gid — used to sandbox the candidate
 }
 
 export type ClaudeEvent =
@@ -79,6 +81,11 @@ export class ClaudeBridge extends EventEmitter {
       cwd: this.options.cwd ?? process.cwd(),
       env,
       stdio: ["pipe", "pipe", "pipe"],
+      // Drop to an unprivileged user so the candidate's Claude (and its Bash
+      // tools) cannot read the interviewer's protected files. Requires the
+      // parent to be root; ignored when uid/gid are undefined.
+      ...(this.options.uid !== undefined ? { uid: this.options.uid } : {}),
+      ...(this.options.gid !== undefined ? { gid: this.options.gid } : {}),
     });
 
     // Set up NDJSON line-by-line parser on stdout

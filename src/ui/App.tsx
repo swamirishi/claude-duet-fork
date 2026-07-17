@@ -4,6 +4,7 @@ import { StatusBar } from "./StatusBar.js";
 import { ChatView, buildLines } from "./ChatView.js";
 import { FileTree, flattenTree } from "./FileTree.js";
 import { FileViewer } from "./FileViewer.js";
+import { QuestionBox } from "./QuestionBox.js";
 import { UiStore, useUiState } from "./store.js";
 
 interface AppProps {
@@ -17,7 +18,7 @@ interface AppProps {
 }
 
 const HOST_CMDS = ["/trust", "/approval", "/kick", "/effort "];
-const BASE_CMDS = ["@claude ", "/help", "/status", "/clear", "/shell", "/leave", "/end", "/quit"];
+const BASE_CMDS = ["@claude ", "/help", "/status", "/clear", "/question", "/shell", "/watch", "/leave", "/end", "/quit"];
 
 export function ghostCompletion(input: string, role: "host" | "guest"): string | null {
   if (!input) return null;
@@ -47,7 +48,11 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
   const showApprove = showJoinInfo && !!state.approveLink;
   // Chrome rows: StatusBar (3) + input bar (3) + hint (1) = 7; host join banner up
   // to 2 more, +2 for the pinned candidate link, +1 for the approve line.
-  const bodyHeight = Math.max(4, rows - 7 - (showJoinInfo ? 2 : 0) - (showWebLink ? 2 : 0) - (showApprove ? 1 : 0));
+  // One row of headroom (rows - 8, not rows - 7): if the frame fills the whole
+  // terminal, Ink switches from incremental diffs to a full clear-and-repaint on
+  // every render, which flickers badly over a web terminal (ttyd/xterm). Keeping
+  // the frame strictly shorter than the terminal keeps Ink on incremental updates.
+  const bodyHeight = Math.max(4, rows - 8 - (showJoinInfo ? 2 : 0) - (showWebLink ? 2 : 0) - (showApprove ? 1 : 0));
   const treeHeight = Math.max(4, Math.floor(bodyHeight / 2));
   const viewerHeight = Math.max(4, bodyHeight - treeHeight);
 
@@ -57,7 +62,9 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
   const chatColWidth = cols - sidebarWidth - 1;
   const chatTextWidth = Math.max(10, chatColWidth - 1);
   const indicatorLines = (state.claudeProcessing ? 1 : 0) + (state.typingUser ? 1 : 0);
-  const chatHeight = Math.max(1, bodyHeight - indicatorLines);
+  // Question box pinned at the top of the chat column (up to ~40% of the pane).
+  const questionHeight = state.question ? Math.min(10, Math.max(4, Math.floor(bodyHeight * 0.4))) : 0;
+  const chatHeight = Math.max(1, bodyHeight - indicatorLines - questionHeight);
   const maxChatScroll = Math.max(0, buildLines(state.messages, chatTextWidth).length - chatHeight);
   const scrollChat = (delta: number) =>
     store.set({ chatScroll: Math.min(maxChatScroll, Math.max(0, store.state.chatScroll + delta)) });
@@ -181,7 +188,7 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
   const rootName = state.fsRoot ? state.fsRoot.split("/").filter(Boolean).pop() || "/" : "project";
 
   return (
-    <Box flexDirection="column" height={rows}>
+    <Box flexDirection="column" height={Math.max(1, rows - 1)}>
       <StatusBar
         hostUser={state.hostUser}
         guestUser={state.guestUser}
@@ -233,6 +240,9 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
       ) : null}
       <Box flexGrow={1}>
         <Box flexDirection="column" width={chatColWidth} height={bodyHeight}>
+          {state.question && questionHeight > 0 ? (
+            <QuestionBox question={state.question} width={chatColWidth} height={questionHeight} />
+          ) : null}
           <ChatView messages={state.messages} width={chatTextWidth} height={chatHeight} scroll={state.chatScroll} />
           {state.claudeProcessing ? <Text dimColor>  ✦ Claude is thinking…</Text> : null}
           {state.typingUser ? <Text dimColor>  ✎ {state.typingUser} is typing…</Text> : null}

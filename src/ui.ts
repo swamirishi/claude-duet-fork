@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { render, type Instance } from "ink";
 import { App } from "./ui/App.js";
 import { UiStore } from "./ui/store.js";
+import { createDiffStdout } from "./ui/diff-stdout.js";
 import type { FsNode } from "./protocol.js";
 
 interface TerminalUIOptions {
@@ -95,7 +96,9 @@ export class TerminalUI {
           }
         },
       }),
-      { exitOnCtrlC: false },
+      // Route Ink's full-frame repaints through a line-diff shim so a keystroke
+      // rewrites one line, not the whole screen (smooth over a web terminal).
+      { stdout: createDiffStdout(process.stdout), patchConsole: false, exitOnCtrlC: false },
     );
   }
 
@@ -151,6 +154,11 @@ export class TerminalUI {
   // Advertise that the shared interactive shell (Ctrl-T) is available.
   setShellEnabled(enabled: boolean): void {
     this.store.set({ shellEnabled: enabled });
+  }
+
+  // The interview question (markdown) shown in the pinned box.
+  setQuestion(text?: string): void {
+    this.store.set({ question: text });
   }
 
   // ---- Shared shell overlay (fullscreen PTY takeover) ----

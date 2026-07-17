@@ -1,9 +1,19 @@
 #!/usr/bin/env node
 
 import { Command } from "commander";
+import { readFileSync } from "node:fs";
 import { loadConfig } from "./config.js";
 
 const program = new Command();
+
+function readQuestion(path?: string): string | undefined {
+  if (!path) return undefined;
+  try {
+    return readFileSync(path, "utf8").trim() || undefined;
+  } catch {
+    return undefined; // missing/unreadable question file — just skip the box
+  }
+}
 
 program
   .name("claude-duet")
@@ -26,6 +36,14 @@ program
   .option("--web-user <name>", "basic-auth username shown with the browser link")
   .option("--approve-link <url>", "local URL where you approve candidate check-ins")
   .option("--allow-shell", "enable the shared interactive shell (Ctrl-T) in the sandbox")
+  .option("--run-as-uid <uid>", "run Claude + the candidate shell as this uid (sandbox)")
+  .option("--run-as-gid <gid>", "run Claude + the candidate shell as this gid")
+  .option("--record-file <path>", "append the full transcript to this file (interviewer-only)")
+  .option("--interviewer-uid <uid>", "run the interviewer's private shell as this uid")
+  .option("--interviewer-gid <gid>", "run the interviewer's private shell as this gid")
+  .option("--interviewer-home <path>", "HOME for the interviewer's private shell")
+  .option("--interviewer-root <path>", "extra dir shown only in the host's file tree (e.g. records)")
+  .option("--question-file <path>", "markdown file shown in the pinned question box on startup")
   .action(async (options) => {
     console.log("  Starting session...");
     const { hostCommand } = await import("./commands/host.js");
@@ -46,6 +64,14 @@ program
       webUser: options.webUser,
       approveLink: options.approveLink,
       allowShell: options.allowShell || false,
+      runAsUid: options.runAsUid !== undefined ? parseInt(options.runAsUid, 10) : undefined,
+      runAsGid: options.runAsGid !== undefined ? parseInt(options.runAsGid, 10) : undefined,
+      recordFile: options.recordFile,
+      interviewerUid: options.interviewerUid !== undefined ? parseInt(options.interviewerUid, 10) : undefined,
+      interviewerGid: options.interviewerGid !== undefined ? parseInt(options.interviewerGid, 10) : undefined,
+      interviewerHome: options.interviewerHome,
+      interviewerRoot: options.interviewerRoot,
+      question: readQuestion(options.questionFile),
     });
   });
 

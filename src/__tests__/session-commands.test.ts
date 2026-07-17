@@ -59,6 +59,27 @@ describe("session commands", () => {
     expect(onShell).toHaveBeenCalledTimes(2);
   });
 
+  it("/question prints the loaded question, or a notice when absent", () => {
+    const withQ = createMockContext({ questionText: "Implement an LRU cache" });
+    expect(handleSlashCommand("/question", withQ)).toBe(true);
+    const printed = (withQ.ui.showSystem as any).mock.calls.map((c: any[]) => c[0]).join("\n");
+    expect(printed).toContain("Implement an LRU cache");
+    const noQ = createMockContext({ questionText: undefined });
+    handleSlashCommand("/q", noQ);
+    const msg = (noQ.ui.showSystem as any).mock.calls.map((c: any[]) => c[0]).join("\n");
+    expect(msg.toLowerCase()).toContain("no interview question");
+  });
+
+  it("/watch is host-only and calls onWatch", () => {
+    const onWatch = vi.fn();
+    const host = createMockContext({ role: "host", onWatch });
+    expect(handleSlashCommand("/watch", host)).toBe(true);
+    expect(onWatch).toHaveBeenCalledTimes(1);
+    const guest = createMockContext({ role: "guest", onWatch: vi.fn() });
+    handleSlashCommand("/watch", guest);
+    expect((guest.onWatch as any)).not.toHaveBeenCalled();
+  });
+
   it("/shell reports when the shell isn't enabled", () => {
     const ctx = createMockContext({ onShell: undefined });
     expect(handleSlashCommand("/shell", ctx)).toBe(true);
