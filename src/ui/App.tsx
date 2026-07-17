@@ -48,7 +48,11 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
   const showApprove = showJoinInfo && !!state.approveLink;
   // Chrome rows: StatusBar (3) + input bar (3) + hint (1) = 7; host join banner up
   // to 2 more, +2 for the pinned candidate link, +1 for the approve line.
-  const bodyHeight = Math.max(4, rows - 7 - (showJoinInfo ? 2 : 0) - (showWebLink ? 2 : 0) - (showApprove ? 1 : 0));
+  // One row of headroom (rows - 8, not rows - 7): if the frame fills the whole
+  // terminal, Ink switches from incremental diffs to a full clear-and-repaint on
+  // every render, which flickers badly over a web terminal (ttyd/xterm). Keeping
+  // the frame strictly shorter than the terminal keeps Ink on incremental updates.
+  const bodyHeight = Math.max(4, rows - 8 - (showJoinInfo ? 2 : 0) - (showWebLink ? 2 : 0) - (showApprove ? 1 : 0));
   const treeHeight = Math.max(4, Math.floor(bodyHeight / 2));
   const viewerHeight = Math.max(4, bodyHeight - treeHeight);
 
@@ -184,7 +188,7 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
   const rootName = state.fsRoot ? state.fsRoot.split("/").filter(Boolean).pop() || "/" : "project";
 
   return (
-    <Box flexDirection="column" height={rows}>
+    <Box flexDirection="column" height={Math.max(1, rows - 1)}>
       <StatusBar
         hostUser={state.hostUser}
         guestUser={state.guestUser}
