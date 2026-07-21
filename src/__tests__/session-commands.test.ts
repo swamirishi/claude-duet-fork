@@ -70,6 +70,18 @@ describe("session commands", () => {
     expect(msg.toLowerCase()).toContain("no interview question");
   });
 
+  it("/ide prints the VS Code URL, or a notice when absent", () => {
+    const withIde = createMockContext({ ideLink: "https://ide.trycloudflare.com" });
+    expect(handleSlashCommand("/ide", withIde)).toBe(true);
+    const printed = (withIde.ui.showSystem as any).mock.calls.map((c: any[]) => c[0]).join("\n");
+    expect(printed).toContain("https://ide.trycloudflare.com");
+    expect(printed).toContain("/workspace");
+    const noIde = createMockContext({ ideLink: undefined });
+    handleSlashCommand("/vscode", noIde);
+    const msg = (noIde.ui.showSystem as any).mock.calls.map((c: any[]) => c[0]).join("\n");
+    expect(msg.toLowerCase()).toContain("isn't enabled");
+  });
+
   it("/watch is host-only and calls onWatch", () => {
     const onWatch = vi.fn();
     const host = createMockContext({ role: "host", onWatch });

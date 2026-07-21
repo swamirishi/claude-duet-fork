@@ -37,6 +37,7 @@ interface HostOptions {
   interviewerHome?: string; // HOME for the interviewer's private shell
   interviewerRoot?: string; // extra dir shown ONLY in the host's file tree (e.g. /records)
   question?: string;        // interview question (markdown) shown in the pinned box
+  ideLink?: string;         // remote VS Code (code-server) URL, surfaced by /ide
 }
 
 export async function hostCommand(options: HostOptions): Promise<void> {
@@ -64,6 +65,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
   if (options.webUser) ui.setWebUser(options.webUser);
   if (options.approveLink) ui.setApproveLink(options.approveLink);
   if (options.question) ui.setQuestion(options.question);
+  if (options.ideLink) ui.setIdeLink(options.ideLink);
 
   // Create server first so event handler can reference it
   const server = new ClaudeDuetServer({
@@ -438,6 +440,7 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     onShell: options.allowShell ? () => openInterviewerShell?.() : undefined,
     onWatch: options.allowShell ? () => watchCandidateShell?.() : undefined,
     questionText: options.question,
+    ideLink: options.ideLink,
     onLeave: async () => {
       // Notify guest before shutting down
       server.broadcast({
@@ -492,6 +495,10 @@ export async function hostCommand(options: HostOptions): Promise<void> {
     // Send the interview question so the guest's box populates on join.
     if (options.question) {
       server.broadcast({ type: "question", text: options.question, timestamp: Date.now() });
+    }
+    // Send the remote VS Code URL so the guest's /ide works.
+    if (options.ideLink) {
+      server.broadcast({ type: "ide", url: options.ideLink, timestamp: Date.now() });
     }
 
     // Send the current project tree so the guest's panel populates immediately.

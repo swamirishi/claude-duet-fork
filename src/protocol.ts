@@ -214,6 +214,12 @@ export interface QuestionMessage extends BaseMessage {
   text: string;
 }
 
+// Host → guest: the remote VS Code (code-server) URL, surfaced by /ide.
+export interface IdeMessage extends BaseMessage {
+  type: "ide";
+  url: string;
+}
+
 // Guest → host: raw input bytes (keystrokes) for the shared PTY. The host only
 // writes them when the guest currently holds control.
 export interface ShellInputMessage extends BaseMessage {
@@ -267,7 +273,8 @@ export type ServerMessage =
   | FsFileMessage
   | ShellDataMessage
   | ShellControlGrantMessage
-  | QuestionMessage;
+  | QuestionMessage
+  | IdeMessage;
 
 export type Message = ClientMessage | ServerMessage;
 

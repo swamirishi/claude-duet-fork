@@ -13,6 +13,7 @@ export interface CommandContext {
   onShell?: () => void;
   onWatch?: () => void;
   questionText?: string;
+  ideLink?: string;
 }
 
 const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
@@ -69,6 +70,20 @@ export function handleSlashCommand(input: string, ctx: CommandContext): boolean 
       ctx.ui.showSystem("── Interview question ──");
       for (const line of ctx.questionText.split("\n")) ctx.ui.showSystem(line || " ");
       ctx.ui.showSystem("────────────────────────");
+      return true;
+
+    case "ide":
+    case "vscode":
+      if (!ctx.ideLink) {
+        ctx.ui.showSystem("VS Code isn't enabled for this session.");
+        return true;
+      }
+      ctx.ui.showSystem("");
+      ctx.ui.showSystem("── VS Code (browser) ──");
+      ctx.ui.showSystem(`  Open:     ${ctx.ideLink}`);
+      ctx.ui.showSystem("  Sign in:  the session password");
+      ctx.ui.showSystem("  Full VS Code in your browser, editing /workspace.");
+      ctx.ui.showSystem("───────────────────────");
       return true;
 
     case "watch":
@@ -143,6 +158,9 @@ function showHelp(ctx: CommandContext): void {
   ui.showSystem("  /clear       — Clear the terminal");
   if (ctx.questionText) {
     ui.showSystem("  /question    — Print the full interview question");
+  }
+  if (ctx.ideLink) {
+    ui.showSystem("  /ide         — Open VS Code in the browser (editing /workspace)");
   }
   if (ctx.onShell) {
     ui.showSystem(

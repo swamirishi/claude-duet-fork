@@ -220,6 +220,10 @@ export async function joinCommand(sessionCodeOrOffer: string, options: JoinOptio
         ui.setQuestion((msg as any).text);
         cmdCtx.questionText = (msg as any).text;
         break;
+      case "ide":
+        ui.setIdeLink((msg as any).url);
+        cmdCtx.ideLink = (msg as any).url;
+        break;
       case "shell_control_grant":
         hasShellControl = (msg as any).granted === true;
         controlRequested = false; // answered — allow future requests
