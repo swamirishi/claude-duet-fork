@@ -44,6 +44,7 @@ program
   .option("--interviewer-home <path>", "HOME for the interviewer's private shell")
   .option("--interviewer-root <path>", "extra dir shown only in the host's file tree (e.g. records)")
   .option("--question-file <path>", "markdown file shown in the pinned question box on startup")
+  .option("--ide-link <url>", "remote VS Code (code-server) URL, surfaced by /ide")
   .action(async (options) => {
     console.log("  Starting session...");
     const { hostCommand } = await import("./commands/host.js");
@@ -72,6 +73,7 @@ program
       interviewerHome: options.interviewerHome,
       interviewerRoot: options.interviewerRoot,
       question: readQuestion(options.questionFile),
+      ideLink: options.ideLink,
     });
   });
 

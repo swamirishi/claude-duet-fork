@@ -29,6 +29,7 @@ export interface UiState {
   webUser?: string;       // basic-auth username for the browser link (candidate's name)
   approveLink?: string;   // local URL where the host approves candidate check-ins
   question?: string;      // the interview question (markdown), shown in the pinned box
+  ideLink?: string;       // remote VS Code (code-server) URL, surfaced by /ide
   shellEnabled?: boolean; // host offers the shared interactive shell (Ctrl-T)
   connectionMode: string;
   cost: number;

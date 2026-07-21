@@ -161,6 +161,11 @@ export class TerminalUI {
     this.store.set({ question: text });
   }
 
+  // The remote VS Code (code-server) URL, surfaced by /ide.
+  setIdeLink(url?: string): void {
+    this.store.set({ ideLink: url });
+  }
+
   // ---- Shared shell overlay (fullscreen PTY takeover) ----
 
   isShellActive(): boolean {
