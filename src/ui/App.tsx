@@ -289,8 +289,14 @@ export function App({ store, onInput, onKeystroke, onApproval, onOpenFile, onShe
       )}
       <Box paddingX={1}>
         <Text dimColor>
-          {state.hint ??
-            `Type to chat · @claude <prompt> · Tab: cycle · ↑↓ navigate${state.shellEnabled ? " · Ctrl-T shell" : ""}`}
+          {(() => {
+            const base =
+              state.hint ??
+              `Type to chat · @claude <prompt> · Tab: cycle · ↑↓ navigate${state.shellEnabled ? " · Ctrl-T shell" : ""}`;
+            // Surface /ide in the toolbar once a VS Code link exists (host at start,
+            // guest once the host broadcasts it) — for both roles.
+            return state.ideLink && !base.includes("/ide") ? `${base} · /ide` : base;
+          })()}
         </Text>
       </Box>
     </Box>
