@@ -81,6 +81,12 @@ describe("App render", () => {
     unmount();
   });
 
+  it("shows /ide in the bottom toolbar when a VS Code link is present", () => {
+    const { lastFrame, unmount } = mount("host", (s) => s.set({ ideLink: "https://ide.trycloudflare.com" }));
+    expect(lastFrame() ?? "").toContain("/ide");
+    unmount();
+  });
+
   it("pins the approve URL when an identity gate is running", () => {
     const { lastFrame, unmount } = mount("host", (s) =>
       s.set({ approveLink: "http://localhost:8090" }),
